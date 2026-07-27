@@ -18,4 +18,3 @@ class RefreshToken(Base):
 
     def is_expired(self) -> bool:
         return datetime.utcnow() >= self.expires_at
-handlers

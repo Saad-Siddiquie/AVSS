@@ -6,6 +6,14 @@ AI-powered Computer Vision application for automated video surveillance and miss
 
 This module establishes the foundation: backend, frontend, virtual environment, Git repo, Docker, and PostgreSQL connection.
 
+## Module 3 — Dashboard UI ✅
+
+A responsive frontend dashboard was added to display camera status, alerts, backend health, and overall system status.
+
+## Module 4 — Intelligence Workflow 🚧
+
+The repository now includes a dedicated frontend module structure for operational intelligence, alerts, and workflow monitoring to support the next phase of development.
+
 ## Tech Stack
 
 | Layer | Tech |
@@ -22,25 +30,27 @@ This module establishes the foundation: backend, frontend, virtual environment, 
 avss/
 ├── backend/
 │   ├── app/
-│   │   ├── core/          # config, database connection
-│   │   ├── api/           # route handlers
-│   │   ├── models/        # SQLAlchemy ORM models (Module 2+)
-│   │   ├── schemas/       # Pydantic request/response schemas
+│   │   ├── api/           # health/auth route handlers
+│   │   ├── core/          # config and database setup
+│   │   ├── models/        # SQLAlchemy ORM models
+│   │   ├── schemas/       # Pydantic schemas
 │   │   ├── services/      # business logic
-│   │   ├── utils/         # helpers
+│   │   ├── utils/         # shared helpers
 │   │   └── main.py        # FastAPI entrypoint
 │   ├── requirements.txt
-│   ├── .env.example
-│   └── Dockerfile
+│   ├── Dockerfile
+│   └── README.md
 ├── frontend/
-│   ├── app/                # Next.js App Router pages
-│   ├── components/         # shadcn/ui + custom components (Module 3+)
-│   ├── lib/                # utilities
+│   ├── app/               # Next.js App Router pages
+│   ├── components/        # reusable UI and module components
+│   │   └── modules/
+│   │       └── module4/   # Module 4 UI scaffolding
+│   ├── lib/               # utilities
 │   ├── package.json
 │   ├── tailwind.config.ts
 │   └── Dockerfile
 ├── docker-compose.yml
-└── .gitignore
+└── README.md
 ```
 
 ## Setup Instructions
@@ -119,6 +129,7 @@ git push -u origin main
 
 - **Module 2** — Authentication System (Register, Login, JWT, Roles, Profile)
 - **Module 3** — Dashboard (Home, Sidebar, Stats, Alerts, Camera Status)
+- **Module 4** — Intelligence Workflow (Alerts queue, detection monitoring, operational metrics)
 
 ## Team
 

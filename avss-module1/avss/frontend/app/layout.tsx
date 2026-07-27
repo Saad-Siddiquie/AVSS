@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AVSS - Autonomous Video Surveillance System",
-  description: "AI-powered video surveillance for missing persons detection",
+  title: "AVSS Dashboard",
+  description: "Module 3 dashboard for the AVSS surveillance system",
 };
 
 export default function RootLayout({
@@ -13,7 +13,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body className="bg-slate-50 text-slate-900">{children}</body>
     </html>
   );
 }
