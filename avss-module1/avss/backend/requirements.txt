@@ -1,0 +1,18 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+sqlalchemy==2.0.35
+psycopg2-binary==2.9.9
+alembic==1.13.3
+python-dotenv==1.0.1
+pydantic==2.9.2
+pydantic-settings==2.5.2
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.9
+
+# AI / CV stack (added progressively in later modules, listed here for reference)
+# ultralytics==8.2.103        # YOLOv8 / YOLOv8-Face
+# insightface==0.7.3          # Face Recognition
+# faiss-cpu==1.8.0            # Similarity Search
+# opencv-python==4.10.0.84
+# numpy==1.26.4
