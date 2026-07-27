@@ -1,12 +1,39 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Module4Metrics, Module4Overview } from "@/components/modules/module4";
+import { Module4Metrics, Module4Overview, Module4Workflow } from "@/components/modules/module4";
+import { Module5Workflow } from "@/components/modules/module5";
 
 type HealthResponse = {
   status: string;
   service: string;
   database_connected: boolean;
+};
+
+type Module4OverviewData = {
+  workflow_status: string;
+  queue_size: number;
+  active_alerts: number;
+  resolved_today: number;
+  alerts: Array<{
+    id: number;
+    title: string;
+    zone: string;
+    severity: string;
+    description: string;
+    status: string;
+  }>;
+};
+
+type Module5OverviewData = {
+  pipeline_name: string;
+  framework: string;
+  input_sources: string[];
+  features: Array<{
+    name: string;
+    description: string;
+    status: string;
+  }>;
 };
 
 const statCards = [
@@ -17,7 +44,11 @@ const statCards = [
 
 export default function Home() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [healthError, setHealthError] = useState<string | null>(null);
+  const [module4Data, setModule4Data] = useState<Module4OverviewData | null>(null);
+  const [module4Error, setModule4Error] = useState<string | null>(null);
+  const [module5Data, setModule5Data] = useState<Module5OverviewData | null>(null);
+  const [module5Error, setModule5Error] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/backend/health")
@@ -26,7 +57,23 @@ export default function Home() {
         return res.json();
       })
       .then(setHealth)
-      .catch(() => setError("Could not reach backend. Is FastAPI running?"));
+      .catch(() => setHealthError("Could not reach backend. Is FastAPI running?"));
+
+    fetch("/api/backend/module4/overview")
+      .then((res) => {
+        if (!res.ok) throw new Error("Module 4 data unavailable");
+        return res.json();
+      })
+      .then(setModule4Data)
+      .catch(() => setModule4Error("Module 4 workflow data is currently unavailable."));
+
+    fetch("/api/backend/module5/overview")
+      .then((res) => {
+        if (!res.ok) throw new Error("Module 5 data unavailable");
+        return res.json();
+      })
+      .then(setModule5Data)
+      .catch(() => setModule5Error("Module 5 video processing data is currently unavailable."));
   }, []);
 
   return (
@@ -65,6 +112,8 @@ export default function Home() {
         />
 
         <Module4Metrics />
+        <Module4Workflow overview={module4Data} error={module4Error} />
+        <Module5Workflow overview={module5Data} error={module5Error} />
 
         <section className="grid gap-6 lg:grid-cols-[1.3fr_0.7fr]">
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -88,8 +137,8 @@ export default function Home() {
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <h2 className="text-lg font-semibold">Backend health</h2>
             <div className="mt-4 rounded-xl bg-slate-50 p-4 text-sm">
-              {error && <p className="text-rose-600">{error}</p>}
-              {!error && !health && <p>Checking backend connection...</p>}
+              {healthError && <p className="text-rose-600">{healthError}</p>}
+              {!healthError && !health && <p>Checking backend connection...</p>}
               {health && (
                 <ul className="space-y-2">
                   <li><span className="font-medium">Status:</span> {health.status}</li>

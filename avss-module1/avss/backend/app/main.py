@@ -4,6 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api import health
 from app.api import auth as auth_api
+from app.api import module4 as module4_api
+from app.api import module5 as module5_api
 from app.core.database import Base, engine
 import app.models.user  # ensure models are registered with SQLAlchemy metadata
 import app.models.refresh_token  # ensure refresh token model is registered
@@ -26,6 +28,8 @@ app.add_middleware(
 # Routers
 app.include_router(health.router, prefix=settings.API_PREFIX)
 app.include_router(auth_api.router, prefix=settings.API_PREFIX)
+app.include_router(module4_api.router, prefix=settings.API_PREFIX)
+app.include_router(module5_api.router, prefix=settings.API_PREFIX)
 
 
 # Create DB tables on startup (simple approach for development)
