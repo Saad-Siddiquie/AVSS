@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+*.env
+!.env.example
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+npm-debug.log*
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Database
+*.sqlite3
+pgdata/
+
+# AI model weights (large binary files - Module 6+)
+*.pt
+*.onnx
+*.pth
+weights/
+
+# Misc
+*.log
+.env.local
