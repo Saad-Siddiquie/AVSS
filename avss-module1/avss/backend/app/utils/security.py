@@ -10,18 +10,10 @@ pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    # bcrypt has a 72-byte input limit; truncate to bytes length if necessary
-    pw_bytes = plain_password.encode("utf-8")
-    if len(pw_bytes) > 72:
-        plain_password = pw_bytes[:72].decode("utf-8", errors="ignore")
     return pwd_context.verify(plain_password, hashed_password)
 
 
 def get_password_hash(password: str) -> str:
-    # bcrypt has a 72-byte input limit; truncate if necessary to avoid ValueError
-    pw_bytes = password.encode("utf-8")
-    if len(pw_bytes) > 72:
-        password = pw_bytes[:72].decode("utf-8", errors="ignore")
     return pwd_context.hash(password)
 
 

@@ -17,4 +17,6 @@ COPY . .
 
 EXPOSE 8000
 
+# Development: use --reload for hot reloading.
+# For production, remove --reload and set workers > 1.
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

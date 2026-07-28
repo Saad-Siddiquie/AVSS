@@ -12,10 +12,21 @@ from fastapi.security import OAuth2PasswordBearer
 
 router = APIRouter(tags=["Auth"])
 
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_PREFIX}/auth/login")
 
-def get_current_user(db: Session = Depends(get_db), token: str = Depends(lambda: None)):
-    # FastAPI's dependency injection for header token is handled in the route below
-    raise RuntimeError("Internal: use dependency inside routes")
+
+def get_user_from_token(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    try:
+        payload = security.decode_token(token)
+        email: str = payload.get("sub")
+        if email is None:
+            raise HTTPException(status_code=401, detail="Invalid token payload")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Could not validate credentials")
+    user = auth_service.get_user_by_email(db, email)
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
 
 
 @router.post("/auth/register", response_model=UserRead)
@@ -49,7 +60,6 @@ async def login(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password")
 
     access_token, refresh_token = auth_service.create_tokens_for_user(user)
-    # Persist refresh token with expiry
     try:
         payload = security.decode_token(refresh_token)
         exp = payload.get("exp")
@@ -58,23 +68,6 @@ async def login(request: Request, db: Session = Depends(get_db)):
         expires_at = datetime.utcnow()
     auth_service.persist_refresh_token(db, refresh_token, user, expires_at)
     return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
-
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_PREFIX}/auth/login")
-
-
-def get_user_from_token(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    try:
-        payload = security.decode_token(token)
-        email: str = payload.get("sub")
-        if email is None:
-            raise HTTPException(status_code=401, detail="Invalid token payload")
-    except Exception:
-        raise HTTPException(status_code=401, detail="Could not validate credentials")
-    user = auth_service.get_user_by_email(db, email)
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    return user
 
 
 @router.get("/auth/me", response_model=UserRead)

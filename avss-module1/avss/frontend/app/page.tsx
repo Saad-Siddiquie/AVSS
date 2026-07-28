@@ -3,6 +3,10 @@
 import { useEffect, useState } from "react";
 import { Module4Metrics, Module4Overview, Module4Workflow } from "@/components/modules/module4";
 import { Module5Workflow } from "@/components/modules/module5";
+import { Module6Workflow } from "@/components/modules/module6";
+import { Module7Workflow } from "@/components/modules/module7";
+import { Module8Workflow } from "@/components/modules/module8";
+import { Module9Workflow } from "@/components/modules/module9";
 
 type HealthResponse = {
   status: string;
@@ -36,6 +40,48 @@ type Module5OverviewData = {
   }>;
 };
 
+type Module6OverviewData = {
+  model_name: string;
+  task: string;
+  input_types: string[];
+  features: Array<{
+    name: string;
+    description: string;
+    status: string;
+  }>;
+};
+
+type Module7OverviewData = {
+  model_name: string;
+  task: string;
+  input_types: string[];
+  features: Array<{
+    name: string;
+    description: string;
+    status: string;
+  }>;
+};
+
+type Module8OverviewData = {
+  model_name: string;
+  task: string;
+  input_types: string[];
+  features: Array<{
+    name: string;
+    description: string;
+    status: string;
+  }>;
+};
+
+type Module9OverviewData = {
+  task: string;
+  features: Array<{
+    name: string;
+    description: string;
+    status: string;
+  }>;
+};
+
 const statCards = [
   { label: "Active Cameras", value: "12", tone: "bg-slate-900 text-white" },
   { label: "Alerts Today", value: "4", tone: "bg-emerald-600 text-white" },
@@ -49,6 +95,14 @@ export default function Home() {
   const [module4Error, setModule4Error] = useState<string | null>(null);
   const [module5Data, setModule5Data] = useState<Module5OverviewData | null>(null);
   const [module5Error, setModule5Error] = useState<string | null>(null);
+  const [module6Data, setModule6Data] = useState<Module6OverviewData | null>(null);
+  const [module6Error, setModule6Error] = useState<string | null>(null);
+  const [module7Data, setModule7Data] = useState<Module7OverviewData | null>(null);
+  const [module7Error, setModule7Error] = useState<string | null>(null);
+  const [module8Data, setModule8Data] = useState<Module8OverviewData | null>(null);
+  const [module8Error, setModule8Error] = useState<string | null>(null);
+  const [module9Data, setModule9Data] = useState<Module9OverviewData | null>(null);
+  const [module9Error, setModule9Error] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/backend/health")
@@ -74,6 +128,38 @@ export default function Home() {
       })
       .then(setModule5Data)
       .catch(() => setModule5Error("Module 5 video processing data is currently unavailable."));
+
+    fetch("/api/backend/module6/overview")
+      .then((res) => {
+        if (!res.ok) throw new Error("Module 6 data unavailable");
+        return res.json();
+      })
+      .then(setModule6Data)
+      .catch(() => setModule6Error("Module 6 detection data is currently unavailable."));
+
+    fetch("/api/backend/module7/overview")
+      .then((res) => {
+        if (!res.ok) throw new Error("Module 7 data unavailable");
+        return res.json();
+      })
+      .then(setModule7Data)
+      .catch(() => setModule7Error("Module 7 face detection data is currently unavailable."));
+
+    fetch("/api/backend/module8/overview")
+      .then((res) => {
+        if (!res.ok) throw new Error("Module 8 data unavailable");
+        return res.json();
+      })
+      .then(setModule8Data)
+      .catch(() => setModule8Error("Module 8 face recognition data is currently unavailable."));
+
+    fetch("/api/backend/module9/overview")
+      .then((res) => {
+        if (!res.ok) throw new Error("Module 9 data unavailable");
+        return res.json();
+      })
+      .then(setModule9Data)
+      .catch(() => setModule9Error("Module 9 registration data is currently unavailable."));
   }, []);
 
   return (
@@ -87,7 +173,7 @@ export default function Home() {
               </p>
               <h1 className="text-3xl font-bold">Autonomous Video Surveillance System</h1>
               <p className="mt-2 max-w-2xl text-sm text-slate-600">
-                Module 3 and Module 4 bring a live monitoring overview for camera status, alerts, and system health.
+                Live monitoring overview covering camera status, system health, alerts, and detection module status (Modules 3–9).
               </p>
             </div>
             <div className="rounded-full bg-emerald-100 px-3 py-1 text-sm font-medium text-emerald-700">
@@ -114,6 +200,10 @@ export default function Home() {
         <Module4Metrics />
         <Module4Workflow overview={module4Data} error={module4Error} />
         <Module5Workflow overview={module5Data} error={module5Error} />
+        <Module6Workflow overview={module6Data} error={module6Error} />
+        <Module7Workflow overview={module7Data} error={module7Error} />
+        <Module8Workflow overview={module8Data} error={module8Error} />
+        <Module9Workflow overview={module9Data} error={module9Error} />
 
         <section className="grid gap-6 lg:grid-cols-[1.3fr_0.7fr]">
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
