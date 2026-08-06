@@ -29,7 +29,7 @@ def test_create_camera_returns_201(client):
     response = client.post(
         "/api/v1/cameras",
         json={
-            "name": "Front Entrance",
+            "name": f"Front Entrance {uuid4()}",
             "url": "rtsp://192.168.1.10/stream1",
             "camera_type": "rtsp",
             "location": "Main Gate",
@@ -39,7 +39,7 @@ def test_create_camera_returns_201(client):
     )
     assert response.status_code == 201
     data = response.json()
-    assert data["name"] == "Front Entrance"
+    assert "Front Entrance" in data["name"]
     assert data["camera_type"] == "rtsp"
     assert data["status"] == "inactive"
     assert data["is_active"] is True
