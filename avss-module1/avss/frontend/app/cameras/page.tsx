@@ -1,11 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/hooks/useAuth";
 import { CameraList } from "@/components/cameras/CameraList";
 import { CameraFormModal } from "@/components/cameras/CameraFormModal";
 import type { Camera, CameraFormData } from "@/types/camera";
 
 export default function CamerasPage() {
+  const router = useRouter();
+  const { authHeaders, isLoggedIn, ready } = useAuth();
   const [cameras, setCameras] = useState<Camera[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -20,11 +24,16 @@ export default function CamerasPage() {
   // Delete state
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (ready && !isLoggedIn) router.push("/login");
+  }, [ready, isLoggedIn, router]);
+
   const fetchCameras = async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/backend/cameras");
+      const res = await fetch("/api/backend/cameras", { headers: authHeaders() });
       if (!res.ok) throw new Error(`Server error ${res.status}`);
       const data = await res.json();
       setCameras(data.cameras);
@@ -37,8 +46,8 @@ export default function CamerasPage() {
   };
 
   useEffect(() => {
-    fetchCameras();
-  }, []);
+    if (isLoggedIn) fetchCameras();
+  }, [isLoggedIn]);
 
   const openAddModal = () => {
     setEditingCamera(null);
@@ -70,7 +79,7 @@ export default function CamerasPage() {
 
       const res = await fetch(url, {
         method,
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify(formData),
       });
 
@@ -93,6 +102,7 @@ export default function CamerasPage() {
     try {
       const res = await fetch(`/api/backend/cameras/${cameraId}`, {
         method: "DELETE",
+        headers: authHeaders(),
       });
       if (!res.ok) throw new Error(`Server error ${res.status}`);
       await fetchCameras();

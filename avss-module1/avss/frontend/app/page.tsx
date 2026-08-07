@@ -1,12 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Module4Metrics, Module4Overview, Module4Workflow } from "@/components/modules/module4";
-import { Module5Workflow } from "@/components/modules/module5";
-import { Module6Workflow } from "@/components/modules/module6";
-import { Module7Workflow } from "@/components/modules/module7";
-import { Module8Workflow } from "@/components/modules/module8";
-import { Module9Workflow } from "@/components/modules/module9";
+import Link from "next/link";
 
 type HealthResponse = {
   status: string;
@@ -14,231 +9,163 @@ type HealthResponse = {
   database_connected: boolean;
 };
 
-type Module4OverviewData = {
-  workflow_status: string;
-  queue_size: number;
-  active_alerts: number;
-  resolved_today: number;
-  alerts: Array<{
-    id: number;
-    title: string;
-    zone: string;
-    severity: string;
-    description: string;
-    status: string;
-  }>;
-};
-
-type Module5OverviewData = {
-  pipeline_name: string;
-  framework: string;
-  input_sources: string[];
-  features: Array<{
-    name: string;
-    description: string;
-    status: string;
-  }>;
-};
-
-type Module6OverviewData = {
-  model_name: string;
-  task: string;
-  input_types: string[];
-  features: Array<{
-    name: string;
-    description: string;
-    status: string;
-  }>;
-};
-
-type Module7OverviewData = {
-  model_name: string;
-  task: string;
-  input_types: string[];
-  features: Array<{
-    name: string;
-    description: string;
-    status: string;
-  }>;
-};
-
-type Module8OverviewData = {
-  model_name: string;
-  task: string;
-  input_types: string[];
-  features: Array<{
-    name: string;
-    description: string;
-    status: string;
-  }>;
-};
-
-type Module9OverviewData = {
-  task: string;
-  features: Array<{
-    name: string;
-    description: string;
-    status: string;
-  }>;
-};
-
-const statCards = [
-  { label: "Active Cameras", value: "12", tone: "bg-slate-900 text-white" },
-  { label: "Alerts Today", value: "4", tone: "bg-emerald-600 text-white" },
-  { label: "Missing Persons", value: "8", tone: "bg-amber-500 text-white" },
+const MODULE_CARDS = [
+  {
+    module: "Module 4",
+    title: "Camera Management",
+    description: "Add, edit, delete RTSP streams, webcams, and video file sources.",
+    href: "/cameras",
+    badge: "CRUD",
+    color: "bg-blue-50 border-blue-200",
+  },
+  {
+    module: "Modules 5 & 6",
+    title: "Video & Person Detection",
+    description: "OpenCV video pipeline + YOLOv8 person detection with bounding boxes.",
+    href: "/detect",
+    badge: "YOLOv8",
+    color: "bg-emerald-50 border-emerald-200",
+  },
+  {
+    module: "Modules 7 & 8",
+    title: "Face Detection & Recognition",
+    description: "OpenCV DNN face detector + InsightFace 512-dim embedding generation.",
+    href: "/detect",
+    badge: "InsightFace",
+    color: "bg-violet-50 border-violet-200",
+  },
+  {
+    module: "Module 9",
+    title: "Person Registration",
+    description: "Register persons with photo. Auto-generates face embedding on upload.",
+    href: "/persons",
+    badge: "Registration",
+    color: "bg-amber-50 border-amber-200",
+  },
+  {
+    module: "Module 10",
+    title: "FAISS Similarity Search",
+    description: "Search for a person by face photo. Returns ranked matches from the index.",
+    href: "/search",
+    badge: "FAISS",
+    color: "bg-rose-50 border-rose-200",
+  },
 ];
 
 export default function Home() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
-  const [module4Data, setModule4Data] = useState<Module4OverviewData | null>(null);
-  const [module4Error, setModule4Error] = useState<string | null>(null);
-  const [module5Data, setModule5Data] = useState<Module5OverviewData | null>(null);
-  const [module5Error, setModule5Error] = useState<string | null>(null);
-  const [module6Data, setModule6Data] = useState<Module6OverviewData | null>(null);
-  const [module6Error, setModule6Error] = useState<string | null>(null);
-  const [module7Data, setModule7Data] = useState<Module7OverviewData | null>(null);
-  const [module7Error, setModule7Error] = useState<string | null>(null);
-  const [module8Data, setModule8Data] = useState<Module8OverviewData | null>(null);
-  const [module8Error, setModule8Error] = useState<string | null>(null);
-  const [module9Data, setModule9Data] = useState<Module9OverviewData | null>(null);
-  const [module9Error, setModule9Error] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/backend/health")
-      .then((res) => {
-        if (!res.ok) throw new Error("Backend returned an error");
-        return res.json();
-      })
+      .then((r) => { if (!r.ok) throw new Error("Backend error"); return r.json(); })
       .then(setHealth)
-      .catch(() => setHealthError("Could not reach backend. Is FastAPI running?"));
-
-    fetch("/api/backend/module4/overview")
-      .then((res) => {
-        if (!res.ok) throw new Error("Module 4 data unavailable");
-        return res.json();
-      })
-      .then(setModule4Data)
-      .catch(() => setModule4Error("Module 4 workflow data is currently unavailable."));
-
-    fetch("/api/backend/module5/overview")
-      .then((res) => {
-        if (!res.ok) throw new Error("Module 5 data unavailable");
-        return res.json();
-      })
-      .then(setModule5Data)
-      .catch(() => setModule5Error("Module 5 video processing data is currently unavailable."));
-
-    fetch("/api/backend/module6/overview")
-      .then((res) => {
-        if (!res.ok) throw new Error("Module 6 data unavailable");
-        return res.json();
-      })
-      .then(setModule6Data)
-      .catch(() => setModule6Error("Module 6 detection data is currently unavailable."));
-
-    fetch("/api/backend/module7/overview")
-      .then((res) => {
-        if (!res.ok) throw new Error("Module 7 data unavailable");
-        return res.json();
-      })
-      .then(setModule7Data)
-      .catch(() => setModule7Error("Module 7 face detection data is currently unavailable."));
-
-    fetch("/api/backend/module8/overview")
-      .then((res) => {
-        if (!res.ok) throw new Error("Module 8 data unavailable");
-        return res.json();
-      })
-      .then(setModule8Data)
-      .catch(() => setModule8Error("Module 8 face recognition data is currently unavailable."));
-
-    fetch("/api/backend/module9/overview")
-      .then((res) => {
-        if (!res.ok) throw new Error("Module 9 data unavailable");
-        return res.json();
-      })
-      .then(setModule9Data)
-      .catch(() => setModule9Error("Module 9 registration data is currently unavailable."));
+      .catch(() => setHealthError("Cannot reach backend. Is FastAPI running?"));
   }, []);
 
   return (
     <main className="min-h-screen bg-slate-50 p-6 text-slate-900">
       <div className="mx-auto flex max-w-6xl flex-col gap-6">
+
+        {/* Header */}
         <header className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500">
-                AVSS Dashboard
-              </p>
+              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500">AVSS Dashboard</p>
               <h1 className="text-3xl font-bold">Autonomous Video Surveillance System</h1>
-              <p className="mt-2 max-w-2xl text-sm text-slate-600">
-                Live monitoring overview covering camera status, system health, alerts, and detection module status (Modules 3–9).
+              <p className="mt-2 text-sm text-slate-600 max-w-2xl">
+                AI-powered surveillance platform. Person detection, face recognition, FAISS search,
+                and multi-camera management — built as a BSCS Final Year Project.
               </p>
             </div>
-            <div className="rounded-full bg-emerald-100 px-3 py-1 text-sm font-medium text-emerald-700">
-              {health?.status === "ok" ? "System Online" : "Checking backend..."}
-            </div>
+            <span className={`shrink-0 rounded-full px-3 py-1 text-sm font-medium ${
+              health?.status === "ok"
+                ? "bg-emerald-100 text-emerald-700"
+                : "bg-amber-100 text-amber-700"
+            }`}>
+              {health ? (health.status === "ok" ? "System Online" : "Degraded") : healthError ? "Offline" : "Checking..."}
+            </span>
           </div>
         </header>
 
-        <section className="grid gap-4 md:grid-cols-3">
-          {statCards.map((card) => (
-            <div key={card.label} className={`rounded-2xl p-5 shadow-sm ${card.tone}`}>
-              <p className="text-sm opacity-80">{card.label}</p>
-              <p className="mt-2 text-3xl font-semibold">{card.value}</p>
-            </div>
+        {/* Backend health */}
+        {health && (
+          <div className="grid gap-4 sm:grid-cols-3">
+            {[
+              { label: "Backend", value: health.status === "ok" ? "Online" : "Error", ok: health.status === "ok" },
+              { label: "Database", value: health.database_connected ? "Connected" : "Disconnected", ok: health.database_connected },
+              { label: "Service", value: health.service, ok: true },
+            ].map((item) => (
+              <div key={item.label} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">{item.label}</p>
+                <p className={`mt-1 text-lg font-semibold ${item.ok ? "text-emerald-700" : "text-rose-600"}`}>
+                  {item.value}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+        {healthError && (
+          <div className="rounded-xl bg-rose-50 border border-rose-200 px-4 py-3 text-sm text-rose-700">
+            {healthError}
+          </div>
+        )}
+
+        {/* Module cards */}
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {MODULE_CARDS.map((card) => (
+            <Link
+              key={card.href + card.module}
+              href={card.href}
+              className={`group rounded-2xl border p-5 shadow-sm hover:shadow-md transition-shadow ${card.color}`}
+            >
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">{card.module}</p>
+                <span className="rounded-full bg-white px-2.5 py-0.5 text-xs font-bold text-slate-700 shadow-sm">
+                  {card.badge}
+                </span>
+              </div>
+              <h2 className="font-bold text-slate-900 group-hover:underline">{card.title}</h2>
+              <p className="mt-1 text-sm text-slate-600">{card.description}</p>
+            </Link>
           ))}
-        </section>
+        </div>
 
-        <Module4Overview
-          title="Video intelligence workflow"
-          description="Module 4 focuses on the operational layer for live detections, alerts, and queue management across the surveillance workflow."
-          badge="In Progress"
-        />
-
-        <Module4Metrics />
-        <Module4Workflow overview={module4Data} error={module4Error} />
-        <Module5Workflow overview={module5Data} error={module5Error} />
-        <Module6Workflow overview={module6Data} error={module6Error} />
-        <Module7Workflow overview={module7Data} error={module7Error} />
-        <Module8Workflow overview={module8Data} error={module8Error} />
-        <Module9Workflow overview={module9Data} error={module9Error} />
-
-        <section className="grid gap-6 lg:grid-cols-[1.3fr_0.7fr]">
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-semibold">Camera status</h2>
-            <div className="mt-4 space-y-3">
-              {[
-                ["Front Entrance", "Online"],
-                ["Parking Lot", "Online"],
-                ["Loading Bay", "Warning"],
-              ].map(([name, state]) => (
-                <div key={name} className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3">
-                  <span>{name}</span>
-                  <span className={`rounded-full px-2.5 py-1 text-sm ${state === "Online" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
-                    {state}
-                  </span>
-                </div>
-              ))}
-            </div>
+        {/* API reference */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="font-semibold text-slate-900 mb-3">API Endpoints</h2>
+          <div className="grid gap-2 sm:grid-cols-2 text-xs font-mono">
+            {[
+              ["POST", "/api/v1/cameras", "Add camera"],
+              ["GET",  "/api/v1/cameras", "List cameras"],
+              ["GET",  "/api/v1/video/probe", "Probe video source"],
+              ["POST", "/api/v1/detect/persons", "Detect persons (YOLOv8)"],
+              ["POST", "/api/v1/detect/faces", "Detect faces (DNN)"],
+              ["POST", "/api/v1/recognize/embed", "Generate face embedding"],
+              ["POST", "/api/v1/recognize/compare", "Compare two faces"],
+              ["POST", "/api/v1/persons/register", "Register person"],
+              ["GET",  "/api/v1/persons", "List persons"],
+              ["POST", "/api/v1/search/face", "Search by face (FAISS)"],
+            ].map(([method, path, desc]) => (
+              <div key={path + method} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                <span className={`font-bold ${method === "POST" ? "text-emerald-700" : "text-blue-700"}`}>
+                  {method}
+                </span>
+                <span className="text-slate-700 truncate">{path}</span>
+                <span className="text-slate-400 ml-auto hidden lg:block">{desc}</span>
+              </div>
+            ))}
           </div>
+          <a
+            href="http://localhost:8001/docs"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-4 inline-block text-sm text-blue-600 hover:underline"
+          >
+            Open Swagger UI →
+          </a>
+        </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-semibold">Backend health</h2>
-            <div className="mt-4 rounded-xl bg-slate-50 p-4 text-sm">
-              {healthError && <p className="text-rose-600">{healthError}</p>}
-              {!healthError && !health && <p>Checking backend connection...</p>}
-              {health && (
-                <ul className="space-y-2">
-                  <li><span className="font-medium">Status:</span> {health.status}</li>
-                  <li><span className="font-medium">Service:</span> {health.service}</li>
-                  <li><span className="font-medium">Database:</span> {health.database_connected ? "Connected" : "Disconnected"}</li>
-                </ul>
-              )}
-            </div>
-          </div>
-        </section>
       </div>
     </main>
   );

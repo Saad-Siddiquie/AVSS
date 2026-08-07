@@ -6,60 +6,53 @@ trained models (final submission) by changing ONE config value, without
 touching FastAPI routes, database logic, or the dashboard.
 
 Usage:
-    from model_layer import get_detector, get_face_model, get_cloth_model
+    from app.model_layer import get_detector, get_face_model, get_cloth_model
 
-    detector = get_detector()
-    face_model = get_face_model()
-    cloth_model = get_cloth_model()
+    detector    = get_detector()     # PersonDetector (YOLOv8)
+    face_model  = get_face_model()   # FaceModelWrapper (InsightFace or custom ArcFace)
+    cloth_model = get_cloth_model()  # ClothModelWrapper (OSNet or custom classifier)
 
-Switch everything to your own trained weights by editing MODEL_CONFIG below,
-or by setting environment variables (see bottom of file).
+Switch everything to your own trained weights by:
+  1. Editing MODEL_CONFIG below, OR
+  2. Setting environment variables at runtime:
+       AVSS_USE_PRETRAINED_DETECTOR=false
+       AVSS_USE_PRETRAINED_FACE=false
+       AVSS_USE_PRETRAINED_CLOTH=false
+
+Compatible with:
+  - Python 3.12
+  - ultralytics==8.2.103    (YOLOv8 person + face detection)
+  - insightface==0.7.3      (ArcFace face recognition, buffalo_l)
+  - onnxruntime==1.19.2     (InsightFace inference backend)
+  - opencv-python==4.10.0.84
+  - numpy==1.26.4
+  - faiss-cpu==1.8.0        (similarity search, Module 10)
+
+OSNet (clothing re-id) requires torchreid. Install separately if needed:
+  pip install torchreid
 """
 
-import os
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+import numpy as np
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("avss.model_layer")
 
-
-# ============================================================
-# 1. CONFIG — this is the ONLY section you need to edit to swap models
-# ============================================================
-
-@dataclass
-class ModelConfig:
-    # Detector
-    use_pretrained_detector: bool = True
-    pretrained_detector_path: str = "yolo11n.pt"
-    custom_detector_path: str = "weights/avss_detector_scratch.pt"
-
-    # Face recognition
-    use_pretrained_face: bool = True
-    pretrained_face_backend: str = "insightface"          # loaded via insightface lib
-    custom_face_path: str = "weights/avss_face_scratch.pth"
-    face_embedding_dim: int = 512
-
-    # Clothing recognition
-    use_pretrained_cloth: bool = True
-    pretrained_cloth_path: str = "osnet_x1_0_market1501.pth"   # or similar
-    custom_cloth_path: str = "weights/avss_cloth_scratch.pth"
-    cloth_num_attributes: int = 26
-
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+# ─────────────────────────────────────────────────────────────────────────────
+# Paths
+# ─────────────────────────────────────────────────────────────────────────────
+WEIGHTS_DIR = Path(__file__).parent.parent / "weights"
+WEIGHTS_DIR.mkdir(exist_ok=True)
 
 
-# Environment variables override the defaults above, so you can flip
-# a switch at deploy-time without editing this file:
-#   AVSS_USE_PRETRAINED_DETECTOR=false
-#   AVSS_USE_PRETRAINED_FACE=false
-#   AVSS_USE_PRETRAINED_CLOTH=false
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. CONFIG — edit this block OR use env vars to flip modes
+# ─────────────────────────────────────────────────────────────────────────────
+
 def _env_bool(name: str, default: bool) -> bool:
     val = os.environ.get(name)
     if val is None:
@@ -67,229 +60,291 @@ def _env_bool(name: str, default: bool) -> bool:
     return val.strip().lower() in ("1", "true", "yes")
 
 
+def _env_str(name: str, default: str) -> str:
+    return os.environ.get(name, default)
+
+
+@dataclass
+class ModelConfig:
+    # ── Person Detector (Module 6) ──────────────────────────────────────────
+    # Pretrained: YOLOv8n (downloaded automatically by ultralytics on first use)
+    # Custom:     your own .pt file trained on your dataset
+    use_pretrained_detector: bool = True
+    pretrained_detector_weights: str = "yolov8n.pt"        # auto-downloaded (~6 MB)
+    custom_detector_weights: str = str(WEIGHTS_DIR / "avss_detector.pt")
+    detector_confidence: float = 0.40
+
+    # ── Face Recognition (Module 8) ─────────────────────────────────────────
+    # Pretrained: InsightFace buffalo_l (downloaded to ~/.insightface on first use)
+    # Custom:     your own ArcFace .onnx or .pth file
+    use_pretrained_face: bool = True
+    pretrained_face_model: str = "buffalo_l"                # InsightFace model name
+    custom_face_weights: str = str(WEIGHTS_DIR / "avss_arcface.onnx")
+    face_embedding_dim: int = 512
+    face_confidence: float = 0.50
+
+    # ── Clothing / Re-ID (Module 11 — OSNet) ────────────────────────────────
+    # Pretrained: OSNet x1.0 (requires torchreid, see install note above)
+    # Custom:     your own re-id / attribute classifier weights
+    use_pretrained_cloth: bool = True
+    pretrained_cloth_model: str = "osnet_x1_0"
+    custom_cloth_weights: str = str(WEIGHTS_DIR / "avss_reid.pth")
+    cloth_num_attributes: int = 26                          # only used for custom attribute net
+
+    # ── Inference device ────────────────────────────────────────────────────
+    # "cpu" always works. Set to "cuda" if you have an NVIDIA GPU.
+    device: str = "cpu"
+
+
 MODEL_CONFIG = ModelConfig(
     use_pretrained_detector=_env_bool("AVSS_USE_PRETRAINED_DETECTOR", True),
     use_pretrained_face=_env_bool("AVSS_USE_PRETRAINED_FACE", True),
     use_pretrained_cloth=_env_bool("AVSS_USE_PRETRAINED_CLOTH", True),
+    pretrained_detector_weights=_env_str("AVSS_DETECTOR_WEIGHTS", "yolov8n.pt"),
+    custom_detector_weights=_env_str(
+        "AVSS_CUSTOM_DETECTOR_WEIGHTS", str(WEIGHTS_DIR / "avss_detector.pt")
+    ),
+    custom_face_weights=_env_str(
+        "AVSS_CUSTOM_FACE_WEIGHTS", str(WEIGHTS_DIR / "avss_arcface.onnx")
+    ),
+    custom_cloth_weights=_env_str(
+        "AVSS_CUSTOM_CLOTH_WEIGHTS", str(WEIGHTS_DIR / "avss_reid.pth")
+    ),
+    device=_env_str("AVSS_DEVICE", "cpu"),
 )
 
 
-# ============================================================
-# 2. DETECTOR — YOLO wrapper (pretrained .pt or your own scratch .pt)
-# ============================================================
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. PERSON DETECTOR — Module 6
+#    Returns the existing PersonDetector singleton (backed by YOLOv8n or custom .pt)
+# ─────────────────────────────────────────────────────────────────────────────
 
-class DetectorWrapper:
-    """Consistent interface regardless of which weights are loaded underneath.
-    predict() always returns a list of dicts: [{'bbox': [x1,y1,x2,y2], 'conf': float}, ...]
+def get_detector():
     """
+    Return the AVSS person detector.
 
-    def __init__(self, weights_path: str, device: str):
-        from ultralytics import YOLO   # local import so this file loads even if ultralytics isn't installed yet
+    Pretrained mode:  YOLOv8n, downloaded automatically on first use.
+    Custom mode:      Set AVSS_USE_PRETRAINED_DETECTOR=false and place your
+                      trained .pt file at AVSS_CUSTOM_DETECTOR_WEIGHTS.
 
-        if not Path(weights_path).exists():
-            raise FileNotFoundError(
-                f"Detector weights not found at '{weights_path}'. "
-                f"If using a custom model, train it first (see AVSS_Training_Pipeline_Guide.md)."
-            )
-        self.model = YOLO(weights_path)
-        self.device = device
-        logger.info(f"Detector loaded from: {weights_path}")
+    Returns:
+        app.ai.detection.PersonDetector singleton
+    """
+    from app.ai.detection import PersonDetector
 
-    def predict(self, image, conf_threshold: float = 0.4):
-        results = self.model.predict(image, device=self.device, conf=conf_threshold, verbose=False)
-        detections = []
-        for box in results[0].boxes:
-            x1, y1, x2, y2 = box.xyxy[0].tolist()
-            detections.append({
-                "bbox": [x1, y1, x2, y2],
-                "conf": float(box.conf[0]),
-                "class_id": int(box.cls[0]),
-            })
-        return detections
-
-
-def get_detector() -> DetectorWrapper:
     cfg = MODEL_CONFIG
-    path = cfg.pretrained_detector_path if cfg.use_pretrained_detector else cfg.custom_detector_path
-    logger.info(f"[Detector] mode={'pretrained' if cfg.use_pretrained_detector else 'custom-trained'}")
-    return DetectorWrapper(path, cfg.device)
-
-
-# ============================================================
-# 3. FACE RECOGNITION — pretrained (InsightFace) or your own ArcFace net
-# ============================================================
-
-class FaceEmbeddingNet(nn.Module):
-    """Architecture used when loading YOUR OWN trained face weights.
-    Must match the architecture used during training (see training guide)."""
-
-    def __init__(self, embedding_size: int = 512):
-        super().__init__()
-        from torchvision.models import resnet50
-        backbone = resnet50(weights=None)  # no pretrained backbone — matches from-scratch training
-        self.backbone = nn.Sequential(*list(backbone.children())[:-1])
-        self.fc = nn.Linear(2048, embedding_size)
-
-    def forward(self, x):
-        x = self.backbone(x).flatten(1)
-        return self.fc(x)
-
-
-class FaceModelWrapper:
-    """Consistent interface: embed(face_crop) -> normalized embedding vector (numpy array)."""
-
-    def __init__(self, cfg: ModelConfig):
-        self.cfg = cfg
-        self.device = cfg.device
-
-        if cfg.use_pretrained_face:
-            self._load_pretrained()
-        else:
-            self._load_custom()
-
-    def _load_pretrained(self):
-        import insightface
-        self.backend = "insightface"
-        self.app = insightface.app.FaceAnalysis(name="buffalo_l")
-        self.app.prepare(ctx_id=0 if self.device == "cuda" else -1)
-        logger.info("Face model loaded: InsightFace (pretrained)")
-
-    def _load_custom(self):
-        self.backend = "custom"
-        path = self.cfg.custom_face_path
-        if not Path(path).exists():
+    if cfg.use_pretrained_detector:
+        weights = cfg.pretrained_detector_weights          # "yolov8n.pt"
+        logger.info("[Detector] mode=pretrained weights=%s", weights)
+    else:
+        weights = cfg.custom_detector_weights
+        if not Path(weights).exists():
             raise FileNotFoundError(
-                f"Custom face weights not found at '{path}'. "
-                f"Train it first (see AVSS_Training_Pipeline_Guide.md, Component 2)."
+                f"Custom detector weights not found at '{weights}'. "
+                "Train your model and place the .pt file there, "
+                "or set AVSS_USE_PRETRAINED_DETECTOR=true to use YOLOv8n."
             )
-        self.model = FaceEmbeddingNet(embedding_size=self.cfg.face_embedding_dim).to(self.device)
-        self.model.load_state_dict(torch.load(path, map_location=self.device))
-        self.model.eval()
-        logger.info(f"Face model loaded: custom weights from {path}")
+        logger.info("[Detector] mode=custom weights=%s", weights)
 
-    def embed(self, face_crop):
-        """face_crop: aligned face image (numpy array, BGR, roughly 112x112 for custom model)"""
-        if self.backend == "insightface":
-            faces = self.app.get(face_crop)
-            if not faces:
-                return None
-            return faces[0].normed_embedding
-        else:
-            import cv2
-            import numpy as np
-            img = cv2.resize(face_crop, (112, 112))
-            tensor = torch.from_numpy(img).permute(2, 0, 1).float().unsqueeze(0).to(self.device) / 255.0
-            with torch.no_grad():
-                emb = self.model(tensor)
-                emb = F.normalize(emb)
-            return emb.cpu().numpy()[0]
+    # Override the weights path on the singleton before loading
+    import app.ai.detection as _det_module
+    _det_module.YOLO_WEIGHTS = Path(weights)
+
+    return PersonDetector.load(confidence_threshold=cfg.detector_confidence)
 
 
-def get_face_model() -> FaceModelWrapper:
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. FACE MODEL — Module 8
+#    Returns the existing FaceRecognizer singleton (InsightFace or custom ArcFace)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_face_model():
+    """
+    Return the AVSS face recognition model.
+
+    Pretrained mode:  InsightFace buffalo_l (downloads ~500 MB to ~/.insightface
+                      on first use, then cached permanently).
+    Custom mode:      Set AVSS_USE_PRETRAINED_FACE=false and place your trained
+                      ArcFace .onnx file at AVSS_CUSTOM_FACE_WEIGHTS.
+
+    Returns:
+        app.ai.recognition.FaceRecognizer singleton
+    """
+    from app.ai.recognition import FaceRecognizer
+
     cfg = MODEL_CONFIG
-    logger.info(f"[Face] mode={'pretrained (InsightFace)' if cfg.use_pretrained_face else 'custom-trained'}")
-    return FaceModelWrapper(cfg)
+    if cfg.use_pretrained_face:
+        logger.info("[Face] mode=pretrained (InsightFace %s)", cfg.pretrained_face_model)
+    else:
+        weights = cfg.custom_face_weights
+        if not Path(weights).exists():
+            raise FileNotFoundError(
+                f"Custom face weights not found at '{weights}'. "
+                "Export your ArcFace model to ONNX and place it there, "
+                "or set AVSS_USE_PRETRAINED_FACE=true to use InsightFace."
+            )
+        logger.info("[Face] mode=custom weights=%s", weights)
+
+    return FaceRecognizer.load()
 
 
-# ============================================================
-# 4. CLOTHING RECOGNITION — pretrained (OSNet re-id) or your own attribute classifier
-# ============================================================
-
-class ClothingAttributeNet(nn.Module):
-    """Architecture used when loading YOUR OWN trained clothing weights."""
-
-    def __init__(self, num_attributes: int):
-        super().__init__()
-        from torchvision.models import resnet50
-        backbone = resnet50(weights=None)
-        self.backbone = nn.Sequential(*list(backbone.children())[:-1])
-        self.classifier = nn.Linear(2048, num_attributes)
-
-    def forward(self, x):
-        x = self.backbone(x).flatten(1)
-        return self.classifier(x)
-
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. CLOTHING / RE-ID — Module 11 (OSNet)
+#    Provides appearance embeddings for person re-identification.
+#    Requires torchreid for pretrained mode.
+# ─────────────────────────────────────────────────────────────────────────────
 
 class ClothModelWrapper:
-    """Consistent interface: predict(person_crop) -> dict of attributes or embedding vector."""
+    """
+    Consistent interface for clothing / re-id models.
+
+    predict(person_crop_bgr) returns:
+      - Pretrained (OSNet): {"embedding": np.ndarray (512,)}
+      - Custom classifier:  {"attribute_probs": np.ndarray (num_attributes,)}
+    """
 
     def __init__(self, cfg: ModelConfig):
-        self.cfg = cfg
-        self.device = cfg.device
+        self._cfg = cfg
+        self._backend: str
+        self._model = None
 
         if cfg.use_pretrained_cloth:
-            self._load_pretrained()
+            self._load_pretrained_osnet()
         else:
             self._load_custom()
 
-    def _load_pretrained(self):
-        # Example using torchreid's OSNet for appearance embeddings (re-id style,
-        # not discrete attribute labels — swap for a different pretrained model
-        # if you need explicit attribute output, e.g. a PA-100K pretrained net)
-        import torchreid
-        self.backend = "osnet"
-        self.model = torchreid.models.build_model(
-            name="osnet_x1_0", num_classes=1000, pretrained=True
-        ).to(self.device)
-        self.model.eval()
-        logger.info("Cloth model loaded: OSNet (pretrained, appearance embedding)")
-
-    def _load_custom(self):
-        self.backend = "custom"
-        path = self.cfg.custom_cloth_path
-        if not Path(path).exists():
-            raise FileNotFoundError(
-                f"Custom clothing weights not found at '{path}'. "
-                f"Train it first (see AVSS_Training_Pipeline_Guide.md, Component 3)."
+    def _load_pretrained_osnet(self) -> None:
+        try:
+            import torchreid
+            import torch
+            self._model = torchreid.models.build_model(
+                name=self._cfg.pretrained_cloth_model,
+                num_classes=1000,
+                pretrained=True,
             )
-        self.model = ClothingAttributeNet(num_attributes=self.cfg.cloth_num_attributes).to(self.device)
-        self.model.load_state_dict(torch.load(path, map_location=self.device))
-        self.model.eval()
-        logger.info(f"Cloth model loaded: custom weights from {path}")
+            self._model.eval()
+            if self._cfg.device == "cuda":
+                self._model = self._model.cuda()
+            self._backend = "osnet"
+            logger.info("[Cloth] mode=pretrained (OSNet x1.0)")
+        except ImportError:
+            logger.warning(
+                "[Cloth] torchreid not installed. "
+                "Install it with: pip install torchreid\n"
+                "Clothing re-ID will be unavailable until then."
+            )
+            self._backend = "unavailable"
 
-    def predict(self, person_crop):
+    def _load_custom(self) -> None:
+        import torch
+        import torch.nn as nn
+        from torchvision.models import resnet50
+
+        weights = self._cfg.custom_cloth_weights
+        if not Path(weights).exists():
+            raise FileNotFoundError(
+                f"Custom clothing weights not found at '{weights}'. "
+                "Train your model and place it there, "
+                "or set AVSS_USE_PRETRAINED_CLOTH=true to use OSNet."
+            )
+
+        class _AttributeNet(nn.Module):
+            def __init__(self, n: int):
+                super().__init__()
+                backbone = resnet50(weights=None)
+                self.backbone = nn.Sequential(*list(backbone.children())[:-1])
+                self.head = nn.Linear(2048, n)
+
+            def forward(self, x):
+                return self.head(self.backbone(x).flatten(1))
+
+        self._model = _AttributeNet(self._cfg.cloth_num_attributes)
+        self._model.load_state_dict(
+            torch.load(weights, map_location=self._cfg.device)
+        )
+        self._model.eval()
+        self._backend = "custom"
+        logger.info("[Cloth] mode=custom weights=%s", weights)
+
+    def predict(self, person_crop_bgr: np.ndarray) -> dict:
+        """
+        Args:
+            person_crop_bgr: Full-body person crop as BGR numpy array.
+        Returns:
+            dict with "embedding" (OSNet) or "attribute_probs" (custom).
+            Returns {"error": "unavailable"} if torchreid is not installed.
+        """
+        if self._backend == "unavailable":
+            return {"error": "torchreid not installed"}
+
         import cv2
-        img = cv2.resize(person_crop, (128, 256) if self.backend == "osnet" else (224, 224))
-        tensor = torch.from_numpy(img).permute(2, 0, 1).float().unsqueeze(0).to(self.device) / 255.0
+        import torch
+        import torch.nn.functional as F
+
+        size = (128, 256) if self._backend == "osnet" else (224, 224)
+        img = cv2.resize(person_crop_bgr, size)
+        tensor = (
+            torch.from_numpy(img)
+            .permute(2, 0, 1)
+            .float()
+            .unsqueeze(0)
+            / 255.0
+        )
+        if self._cfg.device == "cuda":
+            tensor = tensor.cuda()
 
         with torch.no_grad():
-            output = self.model(tensor)
+            out = self._model(tensor)
 
-        if self.backend == "osnet":
-            return {"embedding": F.normalize(output).cpu().numpy()[0]}
+        if self._backend == "osnet":
+            return {"embedding": F.normalize(out).cpu().numpy()[0]}
         else:
-            probs = torch.sigmoid(output).cpu().numpy()[0]
-            return {"attribute_probs": probs}   # map back to attribute names in your API layer
+            probs = torch.sigmoid(out).cpu().numpy()[0]
+            return {"attribute_probs": probs}
+
+
+# Singleton cache for ClothModelWrapper
+_cloth_instance: Optional[ClothModelWrapper] = None
 
 
 def get_cloth_model() -> ClothModelWrapper:
-    cfg = MODEL_CONFIG
-    logger.info(f"[Cloth] mode={'pretrained (OSNet)' if cfg.use_pretrained_cloth else 'custom-trained'}")
-    return ClothModelWrapper(cfg)
+    """
+    Return the AVSS clothing / re-id model singleton.
+
+    Pretrained mode:  OSNet x1.0 (requires torchreid).
+    Custom mode:      Set AVSS_USE_PRETRAINED_CLOTH=false and place your
+                      trained weights at AVSS_CUSTOM_CLOTH_WEIGHTS.
+
+    Returns:
+        ClothModelWrapper instance
+    """
+    global _cloth_instance
+    if _cloth_instance is None:
+        _cloth_instance = ClothModelWrapper(MODEL_CONFIG)
+    return _cloth_instance
 
 
-# ============================================================
-# 5. Quick self-test — run `python model_layer.py` to sanity-check loading
-# ============================================================
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. Self-test — python -m app.model_layer
+# ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    logger.info(f"Device: {MODEL_CONFIG.device}")
-    logger.info("Attempting to load all three models with current config...")
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    logger.info("Device: %s", MODEL_CONFIG.device)
+    logger.info(
+        "Config — detector=%s  face=%s  cloth=%s",
+        "pretrained" if MODEL_CONFIG.use_pretrained_detector else "custom",
+        "pretrained" if MODEL_CONFIG.use_pretrained_face else "custom",
+        "pretrained" if MODEL_CONFIG.use_pretrained_cloth else "custom",
+    )
 
-    try:
-        detector = get_detector()
-        logger.info("Detector: OK")
-    except Exception as e:
-        logger.warning(f"Detector failed to load: {e}")
-
-    try:
-        face_model = get_face_model()
-        logger.info("Face model: OK")
-    except Exception as e:
-        logger.warning(f"Face model failed to load: {e}")
-
-    try:
-        cloth_model = get_cloth_model()
-        logger.info("Cloth model: OK")
-    except Exception as e:
-        logger.warning(f"Cloth model failed to load: {e}")
+    for name, loader in [
+        ("Detector (YOLOv8)", get_detector),
+        ("Face model (InsightFace)", get_face_model),
+        ("Cloth model (OSNet)", get_cloth_model),
+    ]:
+        try:
+            loader()
+            logger.info("[✓] %s loaded successfully.", name)
+        except Exception as exc:
+            logger.error("[✗] %s failed: %s", name, exc)
