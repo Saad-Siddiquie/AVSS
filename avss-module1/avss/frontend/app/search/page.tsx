@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, type ChangeEvent } from "react";
+import { useState, useEffect, type ChangeEvent } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/hooks/useAuth";
 
 type SearchResult = {
   rank: number;
@@ -18,6 +20,12 @@ type SearchResponse = {
 };
 
 export default function SearchPage() {
+  const router = useRouter();
+  const { authHeaders, isLoggedIn, ready } = useAuth();
+
+  useEffect(() => {
+    if (ready && !isLoggedIn) router.push("/login");
+  }, [ready, isLoggedIn, router]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [topK, setTopK] = useState(5);
@@ -45,7 +53,7 @@ export default function SearchPage() {
       body.append("image", selectedFile);
       const res = await fetch(
         `/api/backend/search/face?top_k=${topK}&min_similarity=${minSim}`,
-        { method: "POST", body }
+        { method: "POST", headers: authHeaders(), body }
       );
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));

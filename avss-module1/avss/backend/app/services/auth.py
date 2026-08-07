@@ -15,7 +15,12 @@ def get_user_by_email(db: Session, email: str) -> Optional[User]:
 
 def create_user(db: Session, user_in: UserCreate) -> User:
     hashed = get_password_hash(user_in.password)
-    user = User(email=user_in.email, hashed_password=hashed, role=user_in.role)
+    user = User(
+        full_name=user_in.full_name,
+        email=user_in.email,
+        hashed_password=hashed,
+        role=user_in.role,
+    )
     db.add(user)
     db.commit()
     db.refresh(user)
