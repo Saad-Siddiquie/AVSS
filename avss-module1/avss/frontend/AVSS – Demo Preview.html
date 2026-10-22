@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AVSS – Demo Preview</title>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script>tailwind.config={theme:{extend:{colors:{slate:{100:'#f2ead7',200:'#e6dcc3',300:'#d3c8ad',400:'#a39e8c',500:'#7c7f76',600:'#46524e',700:'#2d3835',800:'#171e1c',900:'#0f1413',950:'#090c0b'},emerald:{300:'#7fd6c9',400:'#3fbfae',500:'#1fa593',600:'#13826f'},orange:{300:'#eadcb4',400:'#dccb96',500:'#cdb97a',600:'#b89f5c'}}}}}</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700;800&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>:root{color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html,body{height:100%}body{background:#090c0b linear-gradient(rgba(239,230,208,.035) 1px,transparent 1px) 0 0/32px 32px,linear-gradient(90deg,rgba(239,230,208,.035) 1px,transparent 1px) 0 0/32px 32px;color:#f2ead7;font-family:'Instrument Sans',system-ui,sans-serif}
+h1,h2,aside>div:first-child{font-family:'Bricolage Grotesque',sans-serif;letter-spacing:-.02em}
+.tag{background:#efe6d0;color:#090c0b;border-radius:2px;box-shadow:5px 5px 0 #13826f;transition:transform .15s}
+.tag .text-emerald-400,.tag .text-blue-300,.tag .text-rose-300{filter:brightness(.5)}
+.bg-orange-600.text-white{color:#090c0b}
+.i{background:#0f1413;border:1px solid #46524e;border-radius:2px;padding:.55rem .75rem;width:100%;color:#f2ead7}
+.i:focus,button:focus-visible,a:focus-visible{outline:2px solid #efe6d0;outline-offset:2px}
+.card{background:#171e1c;border:1px solid #2d3835;border-radius:2px;position:relative}
+.card::before,.card::after{content:"";position:absolute;width:12px;height:12px;border:2px solid #3fbfae;pointer-events:none}
+.card::before{top:-1px;left:-1px;border-right:0;border-bottom:0}.card::after{bottom:-1px;right:-1px;border-left:0;border-top:0}
+.bt{border-radius:2px;padding:.5rem .9rem;font-weight:600;font-size:.875rem}.bt:disabled{opacity:.45;cursor:not-allowed}
+@media(prefers-reduced-motion:reduce){*{animation:none!important}}</style></head>
+<body><div id="app"></div><div id="modal"></div><div id="toast" class="fixed bottom-4 right-4 z-50 space-y-2"></div>
+<script>
+/* ===== DEMO BACKEND (mock). Replaced by the real /api/backend in the Next.js project. ===== */
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const DB={users:[
+{id:1,email:'admin@avss.demo',full_name:'Alex Admin',role:'admin',is_active:true,is_superuser:true,pw:'admin123'},
+{id:2,email:'user@avss.demo',full_name:'Uma Operator',role:'user',is_active:true,is_superuser:false,pw:'user123'}],
+cameras:[{id:1,name:'Main Gate',camera_type:'rtsp',url:'rtsp://10.0.0.21/stream1',location:'Gate A',description:'Vehicle and pedestrian entrance'},
+{id:2,name:'Lobby Webcam',camera_type:'webcam',url:'0',location:'Ground floor lobby',description:''},
+{id:3,name:'Archive Footage',camera_type:'file',url:'/data/archive.mp4',location:'Storage',description:'Recorded clips'}],
+jobs:[{job_id:'J-1041',source:'lobby_0912.mp4',camera_id:2,status:'completed',t0:0,frames:5400,detections:812,duration:'01:30'},
+{job_id:'J-1040',source:'gate_night.mp4',camera_id:1,status:'failed',t0:0,frames:1320,detections:0,duration:'00:44',error:'Unsupported codec in stream 0 (demo error)'}],
+search:{},nid:3,njob:1042};
+const body=b=>b instanceof FormData?Object.fromEntries(b):(b||{});
+function jobView(j){const el=Date.now()-j.t0;let s=j.status,p=s==='completed'?100:s==='failed'?(j.progress||60):0;
+ if(j.t0&&s==='processing'){const f=j.source.includes('fail');p=Math.min(f?60:100,Math.floor(el/12000*100));
+  if(p>=100){j.status=s='completed';j.frames=3600;j.detections=486;j.duration='01:00'}else if(f&&p>=60){j.status=s='failed';j.error='Decoder error at frame 2160 (demo)'}}
+ return{job_id:j.job_id,source_file:j.source,camera_id:j.camera_id,status:s,progress:j.status==='completed'?100:p,frames_processed:j.t0&&s==='processing'?Math.floor(p*36):j.frames,total_detections:j.detections,duration:j.duration,error:j.error||null}}
+async function mock(path,method,b,token){await sleep(250);const E=(c,d)=>({status:c,data:{detail:d}}),O=d=>({status:200,data:d});
+ const me=token&&DB.users.find(u=>'tok-'+u.id===token),pub=u=>{const{pw,...r}=u;return r};
+ let m;if(path==='/auth/login'&&method==='POST'){const u=DB.users.find(u=>u.email===b.email&&u.pw===b.password);
+  if(!u)return E(401,'Incorrect email or password');if(!u.is_active)return E(403,'Account is deactivated');return O({access_token:'tok-'+u.id,refresh_token:'ref-'+u.id,user:pub(u)})}
+ if(path==='/auth/register'&&method==='POST'){if(DB.users.some(u=>u.email===b.email))return E(400,'Email already registered');
+  const u={id:DB.nid++,email:b.email,full_name:b.full_name,role:'user',is_active:true,is_superuser:false,pw:b.password};DB.users.push(u);return O({access_token:'tok-'+u.id,refresh_token:'ref-'+u.id,user:pub(u)})}
+ if(!me)return E(401,'Not authenticated');
+ const adm=me.role==='admin';
+ if(path==='/auth/me')return O(pub(me));
+ if(path==='/cameras'&&method==='GET')return O(DB.cameras);
+ if(path==='/pipeline/jobs'&&method==='GET')return O(DB.jobs.map(jobView).reverse().slice(0,50));
+ if(path==='/pipeline/process/upload'||path==='/pipeline/process/camera'){const f=body(b),up=path.endsWith('upload');
+  if(up&&!(f.video&&f.video.name))return E(422,'video file required');const cam=DB.cameras.find(c=>c.id==f.camera_id);if(!up&&!cam)return E(404,'Camera not found');
+  const j={job_id:'J-'+DB.njob++,source:up?f.video.name:cam.name,camera_id:up?null:cam.id,status:'processing',t0:Date.now(),frames:0,detections:0,duration:'--'};DB.jobs.push(j);
+  return O({job_id:j.job_id,status:'processing',message:'Processing started'})}
+ if(m=path.match(/^\/pipeline\/jobs\/(.+)$/)){const j=DB.jobs.find(j=>j.job_id===m[1]);return j?O(jobView(j)):E(404,'Job not found')}
+ if(path==='/pipeline/search'&&method==='POST'){const f=body(b),j=DB.jobs.find(j=>j.job_id===f.job_id);if(!j)return E(404,'Job not found');if(!f.query_image||!f.query_image.name)return E(422,'query_image required');
+  const id='Q-'+Math.random().toString(36).slice(2,7);DB.search[id]={t0:Date.now(),thr:+f.similarity_threshold,cam:DB.cameras.find(c=>c.id===j.camera_id)||DB.cameras[1]};return O({query_id:id,status:'searching'})}
+ if(m=path.match(/^\/pipeline\/search\/(.+)$/)){const s=DB.search[m[1]];if(!s)return E(404,'Search not found');if(Date.now()-s.t0<8000)return O({query_id:m[1],status:'searching'});
+  const n=s.thr>0.8?0:3+Math.floor(s.thr*20);return O({query_id:m[1],status:'completed',total_matches:n,output_video_url:n?'/api/v1/pipeline/video/'+m[1]+'.mp4':null,camera:{id:s.cam.id,name:s.cam.name,location:s.cam.location}})}
+ if(path.startsWith('/admin')||['POST','PUT','DELETE'].includes(method)){if(!adm)return E(403,'Admin access required')}
+ if(path==='/admin/users'&&method==='GET')return O(DB.users.map(pub));
+ if(path==='/admin/users'&&method==='POST'){if(DB.users.some(u=>u.email===b.email))return E(400,'Email already registered');const u={id:DB.nid++,...b,is_active:true,is_superuser:b.role==='admin'};DB.users.push(u);return O(pub(u))}
+ if(m=path.match(/^\/admin\/users\/(\d+)$/)){const i=DB.users.findIndex(u=>u.id==m[1]);if(i<0)return E(404,'User not found');
+  if(method==='DELETE'){DB.users.splice(i,1);return O({ok:true})}if(method==='PATCH'){Object.assign(DB.users[i],b);return O(pub(DB.users[i]))}}
+ if(path==='/cameras'&&method==='POST'){const c={id:DB.nid++,...b};DB.cameras.push(c);return O(c)}
+ if(m=path.match(/^\/cameras\/(\d+)$/)){const i=DB.cameras.findIndex(c=>c.id==m[1]);if(i<0)return E(404,'Camera not found');
+  if(method==='PUT'){Object.assign(DB.cameras[i],b);return O(DB.cameras[i])}if(method==='DELETE'){DB.cameras.splice(i,1);return O({ok:true})}}
+ return E(404,'Not found')}
+
+/* ===== Frontend: api util + auth ===== */
+const ls={g:k=>{try{return localStorage.getItem(k)}catch(e){return null}},s:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}},d:k=>{try{localStorage.removeItem(k)}catch(e){}}};
+let S={token:null,user:null,ready:false},RID=0,P=null,path='/';
+const isAdmin=()=>!!S.user&&(S.user.role==='admin'||S.user.is_superuser===true);
+const AC=()=>isAdmin()?'orange':'emerald';
+function saveToken(t,r,u){S.token=t;S.user=u;ls.s('avss_token',t);if(r)ls.s('avss_refresh',r);ls.s('avss_user',JSON.stringify(u))}
+function clearToken(){S.token=null;S.user=null;['avss_token','avss_refresh','avss_user'].forEach(ls.d)}
+async function authFetch(p,method='GET',b){const r=await mock(p,method,b,S.token);
+ if(r.status===401&&S.token){clearToken();go('/login');throw new Error('Session expired')}
+ if(r.status>=400)throw new Error(r.data.detail||'Request failed');return r.data}
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const $=s=>document.querySelector(s),app=h=>{$('#app').innerHTML=h};
+function toast(m,err){const d=document.createElement('div');d.className='px-4 py-2 rounded-lg text-sm shadow-lg '+(err?'bg-rose-600':'bg-emerald-600');d.textContent=m;$('#toast').append(d);setTimeout(()=>d.remove(),3500)}
+const go=p=>{if(location.hash==='#'+p)route();else location.hash=p};
+const modal=(t,h)=>{$('#modal').innerHTML=`<div class="fixed inset-0 z-40 bg-black/60 flex items-center justify-center p-4" role="dialog" aria-modal="true"><div class="card w-full max-w-md p-5 shadow-2xl"><h2 class="font-semibold text-lg mb-3">${t}</h2>${h}</div></div>`};
+const closeM=()=>$('#modal').innerHTML='';
+
+/* ===== UI helpers ===== */
+const BADGE={pending:'bg-yellow-500/15 text-yellow-300',processing:'bg-blue-500/15 text-blue-300 animate-pulse',searching:'bg-blue-500/15 text-blue-300 animate-pulse',completed:'bg-emerald-500/15 text-emerald-300',failed:'bg-rose-500/15 text-rose-300'};
+const badge=s=>`<span class="px-2 py-0.5 rounded-full text-xs font-medium ${BADGE[s]||'bg-slate-700 text-slate-300'}">${esc(s)}</span>`;
+const TYPE={rtsp:'bg-blue-500/15 text-blue-300',webcam:'bg-emerald-500/15 text-emerald-300',file:'bg-purple-500/15 text-purple-300'};
+const tbadge=t=>`<span class="px-2 py-0.5 rounded text-xs font-semibold uppercase ${TYPE[t]||''}">${esc(t)}</span>`;
+const bar=p=>`<div class="h-2 bg-slate-700 rounded-full overflow-hidden" role="progressbar" aria-valuenow="${p}" aria-valuemin="0" aria-valuemax="100"><div class="h-full bg-${AC()}-500 transition-all duration-500" style="width:${p}%"></div></div>`;
+const stat=(l,v,c='text-slate-950')=>`<div class="tag p-4" onmousemove="tilt(event,this)" onmouseleave="this.style.transform=''"><div class="text-xs font-semibold text-black/60">${l}</div><div class="text-2xl font-bold mt-1 ${c}">${v}</div></div>`;
+const err=m=>`<div class="rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-200 px-4 py-3 text-sm" role="alert">${esc(m)}</div>`;
+const empty=(t,s)=>`<div class="card p-10 text-center"><div class="font-medium">${t}</div><p class="text-sm text-slate-400 mt-1">${s}</p></div>`;
+const btn=(c)=>`bt bg-${AC()}-600 hover:bg-${AC()}-500 text-white`;
+const fmtSize=b=>b>1e6?(b/1e6).toFixed(1)+' MB':Math.ceil(b/1e3)+' KB';
+
+function shell(p,inner){const ad=isAdmin(),a=AC(),pre=ad?'/admin':'';
+ const items=ad?[['/admin/dashboard','Dashboard'],['/admin/users','Users'],['/admin/cameras','Cameras'],['/admin/jobs','All Jobs'],['/admin/pipeline','Pipeline']]:[['/dashboard','Dashboard'],['/pipeline','Pipeline'],['/cameras','Cameras']];
+ const ini=(S.user.full_name||'?').split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase();
+ return `<div class="min-h-screen md:flex"><header class="md:hidden flex items-center justify-between bg-slate-900 border-b border-slate-700 px-4 py-3"><b class="text-${a}-500">AVSS${ad?' Admin':''}</b><button class="bt border border-slate-700" aria-label="Open menu" onclick="document.getElementById('sb').classList.toggle('-translate-x-full')">Menu</button></header>
+ <aside id="sb" class="fixed md:static z-30 inset-y-0 left-0 w-64 -translate-x-full md:translate-x-0 transition-transform bg-slate-900 border-r border-slate-700 flex flex-col p-4">
+ <div class="text-xl font-bold text-${a}-500 mb-1">AVSS${ad?' Admin':''}</div><div class="text-xs text-slate-400 mb-6">Video Surveillance System</div>
+ <nav class="space-y-1 flex-1">${items.map(([h,l])=>`<a href="#${h}" onclick="document.getElementById('sb').classList.add('-translate-x-full')" class="block px-3 py-2 rounded-lg text-sm ${p===h?`bg-${a}-600/20 text-${a}-400 font-semibold`:'text-slate-300 hover:bg-slate-800'}" ${p===h?'aria-current="page"':''}>${l}</a>`).join('')}</nav>
+ <div class="border-t border-slate-700 pt-3 flex items-center gap-2"><div class="w-9 h-9 rounded-full bg-${a}-600 grid place-items-center text-sm font-bold">${ini}</div><div class="min-w-0 flex-1"><div class="text-sm truncate">${esc(S.user.full_name)}</div><div class="text-xs text-slate-400">${ad?'Administrator':'User'}</div></div></div>
+ <button onclick="logout()" class="bt mt-3 border border-slate-700 hover:bg-slate-800">Log out</button></aside>
+ <main class="flex-1 p-4 md:p-8 max-w-6xl w-full">${inner}</main></div>`}
+function logout(){clearToken();go('/login')}
+function tilt(e,el){const r=el.getBoundingClientRect(),x=(e.clientX-r.left)/r.width-.5,y=(e.clientY-r.top)/r.height-.5;el.style.transform=`perspective(500px) rotateY(${x*10}deg) rotateX(${-y*10}deg)`}
+const hero=()=>scene($('#hero'),{ink:0x090c0b});
+function scene(c,o){if(!c||!window.THREE)return;const T=THREE,W=c.clientWidth||300,H=c.clientHeight||300,r=new T.WebGLRenderer({canvas:c,alpha:true,antialias:true});r.setPixelRatio(Math.min(devicePixelRatio,2));r.setSize(W,H,false);
+const s=new T.Scene(),cm=new T.PerspectiveCamera(45,W/H,.1,100);cm.position.z=8;const g=new T.Group();s.add(g);
+g.add(new T.LineSegments(new T.WireframeGeometry(new T.IcosahedronGeometry(2,2)),new T.LineBasicMaterial({color:o.ink,transparent:true,opacity:.4})));
+const n=300,p=new Float32Array(n*3);for(let i=0;i<n;i++){const u=Math.random()*2-1,t=Math.random()*6.283,q=Math.sqrt(1-u*u),d=2.4+Math.random()*1.6;p.set([d*q*Math.cos(t),d*u,d*q*Math.sin(t)],i*3)}
+const pg=new T.BufferGeometry();pg.setAttribute('position',new T.BufferAttribute(p,3));g.add(new T.Points(pg,new T.PointsMaterial({color:0x13826f,size:.09})));
+const ring=new T.Mesh(new T.TorusGeometry(2.3,.025,8,64),new T.MeshBasicMaterial({color:0x1fa593}));ring.rotation.x=Math.PI/2;g.add(ring);
+let mx=0,my=0,t=0;const mv=e=>{mx=e.clientX/innerWidth-.5;my=e.clientY/innerHeight-.5};addEventListener('pointermove',mv);const still=matchMedia('(prefers-reduced-motion:reduce)').matches;
+(function f(){if(!document.body.contains(c)){removeEventListener('pointermove',mv);r.dispose();r.forceContextLoss();return}t+=.01;g.rotation.y=t*.6+mx;g.rotation.x=.3+my*.5;ring.position.y=Math.sin(t*2)*2;ring.scale.setScalar(Math.sqrt(Math.max(.05,1-Math.pow(ring.position.y/2.3,2))));r.render(s,cm);if(!still)requestAnimationFrame(f)})()}
+function jobsTable(js,full){if(!js.length)return empty('No jobs yet','Start a search to see processing jobs here.');
+ return `<div class="card overflow-x-auto"><table class="w-full text-sm"><thead class="text-slate-400 text-left"><tr>${['Job','Source','Status','Progress','Frames',full?'Detections':'','Duration',''].map(h=>h?`<th class="p-3 font-medium">${h}</th>`:'').join('')}</tr></thead><tbody>
+ ${js.map(j=>`<tr class="border-t border-slate-700 ${j.error?'cursor-pointer hover:bg-slate-700/30':''}" ${j.error?`onclick="this.nextElementSibling.classList.toggle('hidden')"`:''}><td class="p-3">${j.job_id}</td><td class="p-3">${esc(j.source_file)}${full&&j.camera_id?` <span class="text-slate-500">(cam ${j.camera_id})</span>`:''}</td><td class="p-3">${badge(j.status)}</td><td class="p-3 w-32">${bar(j.progress)}</td><td class="p-3">${j.frames_processed}</td>${full?`<td class="p-3">${j.total_detections}</td>`:''}<td class="p-3">${j.duration}</td><td class="p-3">${j.status==='completed'&&!full?`<a class="text-emerald-400 underline" href="#/pipeline">Search</a>`:j.error?'<span class="text-xs text-slate-500">details</span>':''}</td></tr>
+ ${j.error?`<tr class="hidden bg-rose-500/5"><td colspan="8" class="p-3 text-rose-300 text-xs">${esc(j.error)}</td></tr>`:''}`).join('')}</tbody></table></div>`}
+
+/* ===== Views ===== */
+const V={};
+function authCard(t,sub,inner){return `<div class="min-h-screen lg:grid lg:grid-cols-2"><div class="relative h-64 lg:h-auto overflow-hidden" style="background:#efe6d0"><canvas id="hero" class="absolute inset-0 w-full h-full" aria-hidden="true"></canvas><div class="relative p-8 text-black"><div class="text-5xl font-extrabold" style="font-family:'Bricolage Grotesque',sans-serif;letter-spacing:-.04em">AVSS</div><p class="mt-2 max-w-xs text-sm text-black/70">One face, hours of footage, a few minutes to find them.</p></div></div><div class="grid place-items-center p-6"><div class="w-full max-w-md"><div class="card p-6"><h1 class="text-xl font-semibold">${t}</h1><p class="text-sm text-slate-400 mb-4">${sub}</p><div id="aerr"></div>${inner}</div><p class="text-center text-xs text-amber-300/80 mt-4">Demo preview with a mock backend</p></div></div></div>`}
+V['/login']=()=>authCard('Sign in','Authorized security personnel only.',`<form onsubmit="doLogin(event)" class="space-y-3" novalidate><label class="block text-sm">Email<input name="email" type="email" autocomplete="username" class="i mt-1" required></label>
+<label class="block text-sm">Password<div class="relative"><input id="pw" name="password" type="password" autocomplete="current-password" class="i mt-1 pr-16" required><button type="button" class="absolute right-2 top-3.5 text-xs text-slate-400" onclick="const p=$('#pw');p.type=p.type==='password'?'text':'password'">Show</button></div></label>
+<button id="sub" class="bt w-full bg-emerald-600 hover:bg-emerald-500 text-white">Sign in</button></form>
+<div class="mt-4 text-xs text-slate-400 border-t border-slate-700 pt-3">Demo accounts: <button class="underline" onclick="fill('user@avss.demo','user123')">User</button> · <button class="underline" onclick="fill('admin@avss.demo','admin123')">Admin</button></div>
+<p class="text-sm mt-3 text-slate-400">No account? <a class="text-emerald-400 underline" href="#/register">Register</a></p>`);
+const fill=(e,p)=>{const f=document.forms[0];f.email.value=e;f.password.value=p};
+async function doLogin(e){e.preventDefault();const f=Object.fromEntries(new FormData(e.target));
+ if(!/^\S+@\S+\.\S+$/.test(f.email||''))return $('#aerr').innerHTML=err('Enter a valid email address.');if(!f.password)return $('#aerr').innerHTML=err('Enter your password.');
+ $('#sub').disabled=true;$('#sub').textContent='Signing in...';
+ try{const r=await mock('/auth/login','POST',{email:f.email,password:f.password});if(r.status>=400)throw new Error(r.data.detail);
+  saveToken(r.data.access_token,r.data.refresh_token,r.data.user);go('/')}catch(x){$('#aerr').innerHTML=err(x.message);$('#sub').disabled=false;$('#sub').textContent='Sign in'}}
+const strength=p=>[/.{8,}/,/[A-Z]/,/[0-9]/,/[^A-Za-z0-9]/].filter(r=>r.test(p)).length;
+V['/register']=()=>authCard('Create account','Registers a standard user account.',`<form onsubmit="doReg(event)" class="space-y-3" novalidate>
+<label class="block text-sm">Full name<input name="full_name" class="i mt-1"></label><label class="block text-sm">Email<input name="email" type="email" class="i mt-1"></label>
+<label class="block text-sm">Password<input name="password" type="password" class="i mt-1" oninput="const s=strength(this.value);$('#str').textContent=['Too weak','Weak','Fair','Good','Strong'][s];$('#str').className='text-xs '+['text-rose-400','text-rose-400','text-yellow-300','text-emerald-400','text-emerald-400'][s]"><span id="str" class="text-xs text-slate-500">Use 8+ characters, a capital, a number and a symbol</span></label>
+<label class="block text-sm">Confirm password<input name="confirm" type="password" class="i mt-1"></label>
+<button id="sub" class="bt w-full bg-emerald-600 hover:bg-emerald-500 text-white">Create account</button></form><p class="text-sm mt-3 text-slate-400">Already registered? <a class="text-emerald-400 underline" href="#/login">Sign in</a></p>`);
+async function doReg(e){e.preventDefault();const f=Object.fromEntries(new FormData(e.target)),E=m=>$('#aerr').innerHTML=err(m);
+ if(!f.full_name.trim())return E('Enter your full name.');if(!/^\S+@\S+\.\S+$/.test(f.email))return E('Enter a valid email address.');if(strength(f.password)<2||f.password.length<8)return E('Choose a stronger password (8+ characters with mixed types).');if(f.password!==f.confirm)return E('Passwords do not match.');
+ $('#sub').disabled=true;try{const r=await mock('/auth/register','POST',{full_name:f.full_name,email:f.email,password:f.password,role:'user'});if(r.status>=400)throw new Error(r.data.detail);saveToken(r.data.access_token,r.data.refresh_token,r.data.user);go('/')}catch(x){E(x.message);$('#sub').disabled=false}}
+
+V['/dashboard']=async()=>{try{const[js,cs]=await Promise.all([authFetch('/pipeline/jobs'),authFetch('/cameras')]);
+ return `<h1 class="text-2xl font-bold">Welcome, ${esc(S.user.full_name)}</h1><p class="text-slate-400 mb-5">Find a person across your processed footage.</p>
+ <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">${stat('Total jobs',js.length)}${stat('Videos processed',js.filter(j=>j.status==='completed').length,'text-emerald-400')}${stat('Cameras',cs.length)}${stat('System status','API reachable','text-emerald-400 !text-lg')}</div>
+ <a href="#/pipeline" class="${btn()} inline-block mb-5">Start Searching for a Person</a><h2 class="font-semibold mb-2">Recent jobs</h2>${jobsTable(js.slice(0,8),false)}`}catch(x){return err(x.message)}};
+V['/cameras']=async()=>{try{const cs=await authFetch('/cameras');return `<h1 class="text-2xl font-bold mb-1">Cameras</h1><p class="text-sm text-slate-400 mb-4">Read-only. An administrator must add or modify cameras.</p>${camGrid(cs,false)}`}catch(x){return err(x.message)}};
+const camGrid=(cs,ed)=>!cs.length?empty('No cameras registered',ed?'Add the first camera to get started.':'Ask an administrator to add one.'):`<div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">${cs.map(c=>`<div class="card p-4"><div class="flex justify-between items-start"><div class="font-semibold">${esc(c.name)}</div>${tbadge(c.camera_type)}</div><div class="text-sm text-slate-400 mt-2">${esc(c.location||'No location')}</div><div class="text-xs text-slate-500 break-all mt-1">${esc(c.url)}</div>${c.description?`<p class="text-sm mt-2">${esc(c.description)}</p>`:''}${ed?`<div class="flex gap-2 mt-3"><button class="bt border border-slate-600 hover:bg-slate-700" onclick="camForm(${c.id})">Edit</button><button class="bt border border-rose-600 text-rose-300 hover:bg-rose-600/20" onclick="camDel(${c.id},'${esc(c.name)}')">Delete</button></div>`:''}</div>`).join('')}</div>`;
+
+/* Pipeline wizard */
+const STEPS=['Video Source','Processing','Query Photo','Searching','Results'];
+V['/pipeline']=V['/admin/pipeline']=async()=>{P={step:1,tab:'upload',thr:.5,cams:[],err:''};try{P.cams=await authFetch('/cameras')}catch(x){P.err=x.message}return pipe()};
+const redraw=()=>{const h=shell(path,pipe());app(h);if(P.step===4)scene($('#sc'),{ink:0xefe6d0});if(P.step===5&&P.res&&P.res.total_matches)anim()};
+function pipe(){const a=AC(),ad=isAdmin();
+ const ind=`<ol class="flex flex-wrap gap-2 mb-5">${STEPS.map((s,i)=>`<li class="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs border ${i+1<P.step?'bg-emerald-600/20 border-emerald-600 text-emerald-300':i+1===P.step?`border-${a}-500 text-${a}-300 bg-${a}-500/10 font-semibold`:'border-slate-700 text-slate-500'}" ${i+1===P.step?'aria-current="step"':''}>${i+1<P.step?'✓':i+1} ${s}</li>`).join('')}</ol>`;
+ let b='';const E=P.err?err(P.err)+'<div class="h-3"></div>':'';
+ if(P.step===1)b=`<div class="flex gap-2 mb-4">${[['upload','Upload Video File'],['camera','Registered Camera']].map(([k,l])=>`<button class="bt ${P.tab===k?`bg-${a}-600 text-white`:'border border-slate-600'}" onclick="P.tab='${k}';redraw()">${l}</button>`).join('')}</div>
+ ${P.tab==='upload'?`<label class="block border-2 border-dashed border-slate-600 rounded-xl p-8 text-center cursor-pointer hover:border-${a}-500"><input type="file" class="sr-only" accept="video/mp4,video/x-msvideo,video/quicktime,video/x-matroska,.mp4,.avi,.mov,.mkv" onchange="P.file=this.files[0];P.err='';redraw()">${P.file?`<b>${esc(P.file.name)}</b><div class="text-sm text-slate-400">${fmtSize(P.file.size)}</div>`:'Choose an MP4, AVI, MOV or MKV file'}</label>
+ <button class="${btn()} mt-4" ${P.file&&!P.busy?'':'disabled'} onclick="startJob()">${P.busy?'Uploading...':'Upload & Process'}</button>`
+ :P.cams.length?`<label class="block text-sm">Camera<select class="i mt-1" onchange="P.cam=this.value;redraw()"><option value="">Select a camera</option>${P.cams.map(c=>`<option value="${c.id}" ${P.cam==c.id?'selected':''}>${esc(c.name)} · ${c.camera_type} · ${esc(c.location||'')}</option>`).join('')}</select></label><button class="${btn()} mt-4" ${P.cam&&!P.busy?'':'disabled'} onclick="startJob()">Process Camera</button>`:empty('No cameras registered','An administrator can add cameras first.')}`;
+ if(P.step===2){const j=P.job||{progress:0,status:'pending',frames_processed:0,total_detections:0};b=`<div class="flex justify-between text-sm mb-2"><span>Processing ${esc(j.source_file||'video')}</span>${badge(j.status)}</div>${bar(j.progress)}<div class="grid grid-cols-3 gap-3 mt-4">${stat('Progress',j.progress+'%')}${stat('Frames',j.frames_processed)}${stat('Detections',j.total_detections)}</div>
+ ${j.status==='failed'?`<div class="mt-4">${err(j.error||'Processing failed')}<div class="mt-3 flex gap-2"><button class="${btn()}" onclick="pipeReset()">Back to Step 1</button></div></div>`:'<p class="text-xs text-slate-400 mt-3">Checking every 5 seconds.</p>'}`}
+ if(P.step===3){const j=P.job;b=`<div class="grid grid-cols-3 gap-3 mb-4">${stat('Frames',j.frames_processed)}${stat('Detections',j.total_detections)}${stat('Duration',j.duration)}</div>
+ <label class="block border-2 border-dashed border-slate-600 rounded-xl p-5 text-center cursor-pointer hover:border-${a}-500"><input type="file" class="sr-only" accept="image/jpeg,image/png,image/webp" onchange="setPhoto(this.files[0])">${P.photo?`<img src="${P.prev}" alt="Query photo preview" class="mx-auto h-40 rounded-lg object-cover"><div class="text-sm mt-2">${esc(P.photo.name)}</div>`:'Choose a JPEG, PNG or WebP photo'}</label>
+ <div class="mt-4"><label class="text-sm" for="thr">Similarity threshold: <b id="tv">${P.thr.toFixed(2)}</b></label><input id="thr" type="range" min=".1" max=".9" step=".05" value="${P.thr}" class="w-full accent-${a}-500" oninput="P.thr=+this.value;$('#tv').textContent=P.thr.toFixed(2)"><p class="text-xs text-slate-400">Lower = more possible matches · 0.50 recommended · Higher = stricter matching</p></div>
+ <button class="${btn()} mt-4" ${P.photo&&!P.busy?'':'disabled'} onclick="startSearch()">${P.busy?'Submitting...':'Find Person & Generate Tracked Video'}</button>`}
+ if(P.step===4)b=`<div class="text-center py-8"><canvas id="sc" class="mx-auto" style="width:260px;height:260px" aria-hidden="true"></canvas><div class="mt-4 font-medium">Searching...</div><p class="text-sm text-slate-400 mt-1">${P.tick%2?'Tracking the matched person across video frames...':'Comparing face embeddings across stored tracks...'}</p>${P.err?`<div class="mt-4">${err(P.err)}<button class="${btn()} mt-3" onclick="P.step=3;P.err='';redraw()">Try Different Photo</button></div>`:''}</div>`;
+ if(P.step===5){const r=P.res,n=r.total_matches;b=n?`<div class="rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-200 px-4 py-3 mb-4">Person found: ${n} matches</div><div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">${stat('Camera',esc(r.camera?.name||'n/a'),'!text-lg')}${stat('Location',esc(r.camera?.location||'n/a'),'!text-lg')}${stat('Camera ID',r.camera?.id??'n/a','!text-lg')}${stat('Matches',n,'!text-lg')}</div>
+ <canvas id="cv" width="640" height="360" class="w-full rounded-lg bg-slate-950 border border-slate-700" aria-label="Demo tracked video placeholder"></canvas>
+ <p class="text-xs text-slate-400 mt-2">Green box = matched person. The video may include tracking ID, camera information, and timestamp overlays when provided by the processing pipeline.</p>
+ <p class="text-xs text-amber-300/80 mt-1">Demo: this canvas stands in for the video. In the real app the player loads <code>http://localhost:8002${esc(r.output_video_url)}</code> directly, not through the proxy.</p><button class="bt border border-slate-600 mt-3 opacity-50 cursor-not-allowed" disabled>Download MP4 (real backend only)</button>`
+ :`<div class="rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200 px-4 py-3 mb-4">No match found (0 matches). Try a lower threshold or a clearer photo.</div>`;
+ b+=`<div class="flex flex-wrap gap-2 mt-4"><button class="${btn()}" onclick="P.step=3;P.photo=null;P.res=null;redraw()">${n?'Try Different Photo':'Try Different Photo / Lower Threshold'}</button><button class="bt border border-slate-600" onclick="pipeReset()">${n?'Search Another Video':'Start Over'}</button></div>`}
+ return `<div class="flex items-center gap-3 mb-1"><h1 class="text-2xl font-bold">Person Search</h1>${ad?'<span class="px-2 py-0.5 rounded bg-orange-500/20 text-orange-300 text-xs font-semibold">Admin Mode</span>':''}</div><p class="text-sm text-slate-400 mb-4">Five steps: pick footage, process it, upload a photo, search, review results.</p>${ind}<div class="card p-5">${E}${b}</div>`}
+function pipeReset(){clearInterval(P.timer);const c=P.cams;P={step:1,tab:'upload',thr:.5,cams:c,err:''};redraw()}
+function setPhoto(f){if(!f)return;if(!['image/jpeg','image/png','image/webp'].includes(f.type)){P.err='Photo must be JPEG, PNG or WebP.';return redraw()}P.photo=f;P.prev=URL.createObjectURL(f);P.err='';redraw()}
+async function startJob(){P.busy=true;P.err='';redraw();try{let r;if(P.tab==='upload'){const fd=new FormData();fd.append('video',P.file);r=await authFetch('/pipeline/process/upload','POST',fd)}else{const fd=new FormData();fd.append('camera_id',P.cam);r=await authFetch('/pipeline/process/camera','POST',fd)}
+ P.busy=false;P.jobId=r.job_id;P.step=2;P.job=null;redraw();pollJob()}catch(x){P.busy=false;P.err=x.message;redraw()}}
+function pollJob(){const id=P.jobId;const tick=async()=>{try{const j=await authFetch('/pipeline/jobs/'+id);if(P.jobId!==id||P.step!==2)return;P.job=j;
+ if(j.status==='completed'){clearInterval(P.timer);P.step=3}if(j.status==='failed')clearInterval(P.timer);redraw()}catch(x){clearInterval(P.timer);P.err=x.message;redraw()}};tick();P.timer=setInterval(tick,5000)}
+async function startSearch(){P.busy=true;redraw();try{const fd=new FormData();fd.append('query_image',P.photo);fd.append('job_id',P.jobId);fd.append('similarity_threshold',P.thr);const r=await authFetch('/pipeline/search','POST',fd);
+ P.busy=false;P.qid=r.query_id;P.step=4;P.tick=0;P.err='';redraw();pollSearch()}catch(x){P.busy=false;P.err=x.message;redraw()}}
+function pollSearch(){const id=P.qid;const tick=async()=>{try{const r=await authFetch('/pipeline/search/'+id);if(P.qid!==id||P.step!==4)return;P.tick++;
+ if(r.status==='completed'){clearInterval(P.timer);P.res=r;P.step=5}else if(r.status==='failed'){clearInterval(P.timer);P.err=r.error||'Search failed'}redraw()}catch(x){clearInterval(P.timer);P.err=x.message;redraw()}};P.timer=setInterval(tick,5000);setTimeout(()=>{if(P.step===4){P.tick++;redraw()}},2500)}
+function anim(){const c=$('#cv');if(!c)return;const g=c.getContext('2d');let t=0;(function f(){if(!document.body.contains(c))return;t+=.02;g.fillStyle='#0b1220';g.fillRect(0,0,640,360);g.fillStyle='#1e293b';g.fillRect(0,260,640,100);
+ const x=60+(Math.sin(t)+1)*230,y=120;g.fillStyle='#475569';g.fillRect(x+15,y+10,40,100);g.strokeStyle='#22c55e';g.lineWidth=3;g.strokeRect(x,y,70,130);g.fillStyle='#22c55e';g.font='13px Inter';g.fillText('ID 7  '+(P.res.camera?.name||''),x,y-8);g.fillStyle='#94a3b8';g.fillText('00:'+String(Math.floor(t*10)%60).padStart(2,'0'),10,20);requestAnimationFrame(f)})()}
+
+/* Admin views */
+V['/admin/dashboard']=async()=>{try{const[us,cs,js]=await Promise.all([authFetch('/admin/users'),authFetch('/cameras'),authFetch('/pipeline/jobs')]);
+ return `<h1 class="text-2xl font-bold mb-4">Admin Dashboard</h1><div class="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-5">${stat('Total users',us.length)}${stat('Cameras',cs.length)}${stat('Jobs',js.length)}${stat('Active processing',js.filter(j=>j.status==='processing').length,'text-blue-300')}${stat('Completed',js.filter(j=>j.status==='completed').length,'text-emerald-400')}${stat('Failed',js.filter(j=>j.status==='failed').length,'text-rose-300')}</div>
+ <div class="flex flex-wrap gap-2 mb-5"><button class="${btn()}" onclick="go('/admin/cameras');setTimeout(()=>camForm(),50)">Add Camera</button><a href="#/admin/users" class="bt border border-slate-600">Manage Users</a><a href="#/admin/pipeline" class="bt border border-slate-600">Run Search</a></div><h2 class="font-semibold mb-2">Recent activity</h2>${jobsTable(js.slice(0,5),true)}`}catch(x){return err(x.message)}};
+V['/admin/jobs']=async()=>{try{J={all:await authFetch('/pipeline/jobs'),f:'all'};return jobsView()}catch(x){return err(x.message)}};
+let J;const jobsView=()=>{const l=J.f==='all'?J.all:J.all.filter(j=>j.status===J.f);return `<h1 class="text-2xl font-bold mb-3">All Jobs</h1><div class="flex flex-wrap gap-2 mb-3">${['all','pending','processing','completed','failed'].map(f=>`<button class="bt ${J.f===f?'bg-orange-600 text-white':'border border-slate-600'}" onclick="J.f='${f}';app(shell(path,jobsView()))">${f[0].toUpperCase()+f.slice(1)}</button>`).join('')}</div>${jobsTable(l,true)}`};
+V['/admin/cameras']=async()=>{try{CS=await authFetch('/cameras');return camView()}catch(x){return err(x.message)}};
+let CS=[];const camView=()=>`<div class="flex justify-between items-center mb-4"><h1 class="text-2xl font-bold">Cameras</h1><button class="${btn()}" onclick="camForm()">Add Camera</button></div>${camGrid(CS,true)}`;
+function camForm(id){const c=CS.find(x=>x.id===id)||{camera_type:'rtsp'};modal(id?'Edit camera':'Add camera',`<form onsubmit="camSave(event,${id||0})" class="space-y-3"><div id="merr"></div>
+<label class="block text-sm">Name<input name="name" class="i mt-1" value="${esc(c.name||'')}"></label><label class="block text-sm">Type<select name="camera_type" class="i mt-1">${['rtsp','webcam','file'].map(t=>`<option ${c.camera_type===t?'selected':''}>${t}</option>`).join('')}</select></label>
+<label class="block text-sm">URL<input name="url" class="i mt-1" value="${esc(c.url||'')}"></label><label class="block text-sm">Location<input name="location" class="i mt-1" value="${esc(c.location||'')}"></label><label class="block text-sm">Description<input name="description" class="i mt-1" value="${esc(c.description||'')}"></label>
+<div class="flex justify-end gap-2"><button type="button" class="bt border border-slate-600" onclick="closeM()">Cancel</button><button class="${btn()}">Save camera</button></div></form>`)}
+async function camSave(e,id){e.preventDefault();const f=Object.fromEntries(new FormData(e.target));if(!f.name.trim()||!f.url.trim())return $('#merr').innerHTML=err('Name and URL are required.');
+ try{await authFetch(id?'/cameras/'+id:'/cameras',id?'PUT':'POST',f);closeM();CS=await authFetch('/cameras');app(shell(path,camView()));toast('Camera saved')}catch(x){$('#merr').innerHTML=err(x.message)}}
+const confirmM=(t,msg,fn)=>modal(t,`<p class="text-sm text-slate-300 mb-4">${msg}</p><div class="flex justify-end gap-2"><button class="bt border border-slate-600" onclick="closeM()">Cancel</button><button class="bt bg-rose-600 text-white" onclick="${fn}">Delete</button></div>`);
+const camDel=(id,n)=>confirmM('Delete camera',`Delete ${n}? This cannot be undone.`,`doCamDel(${id})`);
+async function doCamDel(id){try{await authFetch('/cameras/'+id,'DELETE');closeM();CS=await authFetch('/cameras');app(shell(path,camView()));toast('Camera deleted')}catch(x){closeM();toast(x.message,1)}}
+let US=[];V['/admin/users']=async()=>{try{US=await authFetch('/admin/users');return usersView()}catch(x){return err(x.message)}};
+const usersView=()=>`<div class="flex justify-between items-center mb-4"><h1 class="text-2xl font-bold">Users</h1><button class="${btn()}" onclick="userForm()">Create user</button></div><div class="card overflow-x-auto"><table class="w-full text-sm"><thead class="text-slate-400 text-left"><tr>${['ID','Name','Email','Role','Status','Actions'].map(h=>`<th class="p-3 font-medium">${h}</th>`).join('')}</tr></thead><tbody>${US.map(u=>{const me=u.id===S.user.id;return `<tr class="border-t border-slate-700"><td class="p-3">${u.id}</td><td class="p-3">${esc(u.full_name)}${me?' <span class="text-xs text-slate-500">(you)</span>':''}</td><td class="p-3">${esc(u.email)}</td>
+<td class="p-3"><select class="i !w-auto !py-1" aria-label="Role" onchange="patchU(${u.id},{role:this.value})"><option ${u.role==='user'?'selected':''}>user</option><option ${u.role==='admin'?'selected':''}>admin</option></select></td><td class="p-3">${u.is_active?'<span class="text-emerald-300">Active</span>':'<span class="text-slate-400">Inactive</span>'}</td>
+<td class="p-3 space-x-2 whitespace-nowrap"><button class="bt border border-slate-600" ${me?'disabled title="You cannot deactivate yourself"':''} onclick="patchU(${u.id},{is_active:${!u.is_active}})">${u.is_active?'Deactivate':'Activate'}</button><button class="bt border border-rose-600 text-rose-300" ${me?'disabled title="You cannot delete yourself"':''} onclick="confirmM('Delete user','Delete ${esc(u.email)}?','doUDel(${u.id})')">Delete</button></td></tr>`}).join('')}</tbody></table></div>`;
+async function patchU(id,b){try{await authFetch('/admin/users/'+id,'PATCH',b);toast('User updated')}catch(x){toast(x.message,1)}US=await authFetch('/admin/users');app(shell(path,usersView()))}
+async function doUDel(id){try{await authFetch('/admin/users/'+id,'DELETE');closeM();toast('User deleted')}catch(x){closeM();toast(x.message,1)}US=await authFetch('/admin/users');app(shell(path,usersView()))}
+function userForm(){modal('Create user',`<form onsubmit="userSave(event)" class="space-y-3"><div id="merr"></div><label class="block text-sm">Full name<input name="full_name" class="i mt-1"></label><label class="block text-sm">Email<input name="email" type="email" class="i mt-1"></label><label class="block text-sm">Password<input name="password" type="password" class="i mt-1"></label>
+<label class="block text-sm">Role<select name="role" class="i mt-1"><option>user</option><option>admin</option></select></label><div class="flex justify-end gap-2"><button type="button" class="bt border border-slate-600" onclick="closeM()">Cancel</button><button class="${btn()}">Create user</button></div></form>`)}
+async function userSave(e){e.preventDefault();const f=Object.fromEntries(new FormData(e.target));if(!f.full_name.trim()||!/^\S+@\S+\.\S+$/.test(f.email)||f.password.length<8)return $('#merr').innerHTML=err('Enter a name, valid email and a password of 8+ characters.');
+ try{await authFetch('/admin/users','POST',f);closeM();US=await authFetch('/admin/users');app(shell(path,usersView()));toast('User created')}catch(x){$('#merr').innerHTML=err(x.message)}}
+
+/* ===== Router + boot ===== */
+async function route(){if(P&&P.timer)clearInterval(P.timer);closeM();const id=++RID;path=location.hash.slice(1)||'/';
+ if(!S.ready)return app('<div class="min-h-screen grid place-items-center text-slate-400">Loading AVSS...</div>');
+ const pub=path==='/login'||path==='/register';
+ if(!S.token){if(!pub)return go('/login')}else{if(pub||path==='/')return go(isAdmin()?'/admin/dashboard':'/dashboard');const ad=path.startsWith('/admin');if(ad&&!isAdmin())return go('/dashboard');if(!ad&&isAdmin())return go('/admin/dashboard')}
+ if(path==='/')return go('/login');const v=V[path];if(!v)return go('/');
+ if(pub){app(v());hero();return}
+ app(shell(path,'<div class="space-y-3 animate-pulse"><div class="h-8 w-48 rounded bg-slate-800"></div><div class="h-28 rounded-xl bg-slate-800"></div><div class="h-48 rounded-xl bg-slate-800"></div></div>'));
+ const h=await v();if(id!==RID)return;app(shell(path,h));if(P&&P.step===5&&P.res&&P.res.total_matches)anim()}
+window.addEventListener('hashchange',route);
+(async()=>{route();const t=ls.g('avss_token');if(t){S.token=t;try{S.user=await authFetch('/auth/me')}catch(e){clearToken()}}S.ready=true;route()})();
+</script></body></html>

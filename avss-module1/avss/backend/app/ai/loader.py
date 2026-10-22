@@ -1,47 +1,43 @@
 """
-AI Model Loader
-Loads all AI models once at application startup.
-Called from main.py lifespan handler so models are warm before the first request.
+AI Model Loader — loads all models at startup.
 """
 import logging
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+WEIGHTS_DIR = Path("weights")
+
 
 def load_all_models() -> None:
-    """
-    Initialise all AI singletons.
-    Each module's model is loaded here so startup errors surface immediately
-    rather than on the first API call.
-    """
-    logger.info("=== Loading AI models ===")
+    logger.info("=== Loading AI Models ===")
 
+    # ── Face Detector (best.pt → yolov8n-face.pt → fallback) ─────────────────
     try:
-        from app.ai.detection import PersonDetector
-        PersonDetector.load()
-        logger.info("[✓] Module 6 — YOLOv8 PersonDetector loaded.")
+        from app.ai.face import FaceDetector, BEST_PT, YOLO_FACE_PT
+        detector = FaceDetector.load()
+        logger.info("[✓] Face Detector: %s", detector.model_name)
     except Exception as exc:
-        logger.error("[✗] Module 6 — PersonDetector failed to load: %s", exc)
+        logger.error("[✗] Face Detector failed: %s", exc)
 
-    try:
-        from app.ai.face import FaceDetector
-        FaceDetector.load()
-        logger.info("[✓] Module 7 — OpenCV DNN FaceDetector loaded.")
-    except Exception as exc:
-        logger.error("[✗] Module 7 — FaceDetector failed to load: %s", exc)
-
+    # ── Face Recognizer (InsightFace ArcFace buffalo_l) ───────────────────────
     try:
         from app.ai.recognition import FaceRecognizer
         FaceRecognizer.load()
-        logger.info("[✓] Module 8 — InsightFace FaceRecognizer loaded.")
+        logger.info("[✓] Face Recognizer: InsightFace ArcFace buffalo_l (512-dim)")
     except Exception as exc:
-        logger.error("[✗] Module 8 — FaceRecognizer failed to load: %s", exc)
+        logger.error("[✗] Face Recognizer failed: %s", exc)
 
+    # ── Person Re-ID (OSNet — osnet_final.pt) ─────────────────────────────────
     try:
-        from app.ai.search import FaceSearchIndex
-        FaceSearchIndex.load()
-        logger.info("[✓] Module 10 — FAISS FaceSearchIndex loaded.")
+        from app.ai.reid import PersonReID, OSNET_WEIGHTS
+        if OSNET_WEIGHTS.exists():
+            PersonReID.load()
+            logger.info("[✓] Person Re-ID: OSNet (weights/osnet_final.pt)")
+        else:
+            logger.warning("[!] OSNet weights not found at %s — re-ID disabled.", OSNET_WEIGHTS)
     except Exception as exc:
-        logger.error("[✗] Module 10 — FaceSearchIndex failed to load: %s", exc)
+        logger.error("[✗] OSNet Re-ID failed to load: %s", exc)
 
-    logger.info("=== AI model loading complete ===")
+    logger.info("=== AI Models Ready ===")
+    logger.info("Pipeline: YOLOv8 → ArcFace + OSNet → FAISS → ByteTrack")

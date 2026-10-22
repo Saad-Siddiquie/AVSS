@@ -1,23 +1,21 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { Navbar } from "@/components/layout/Navbar";
 
 export const metadata: Metadata = {
-  title: "AVSS Dashboard",
-  description: "Autonomous Video Surveillance System — AI-powered surveillance and missing persons detection.",
+  title: "AVSS — Autonomous Video Surveillance System",
+  description: "AI-powered CCTV person search using face recognition, ByteTrack and ArcFace.",
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body className="bg-slate-50 text-slate-900">
-        <Navbar />
-        {children}
-      </body>
+    <html lang="en" className="dark">
+      <head>
+        <link
+          href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700;800&family=Instrument+Sans:wght@400;500;600&display=swap"
+          rel="stylesheet"
+        />
+      </head>
+      <body>{children}</body>
     </html>
   );
 }

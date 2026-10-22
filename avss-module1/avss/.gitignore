@@ -5,14 +5,19 @@ __pycache__/
 .venv/
 venv/
 env/
-*.env
+
+# Environment secrets
+.env
+.env.*
 !.env.example
+!.env.local.example
 
 # Node / Next.js
 node_modules/
 .next/
 out/
 npm-debug.log*
+**/tsconfig.tsbuildinfo
 
 # IDE / OS
 .vscode/
@@ -22,14 +27,17 @@ Thumbs.db
 
 # Database
 *.sqlite3
+*.db
 pgdata/
 
-# AI model weights (large binary files - Module 6+)
+# AI model weights
 *.pt
 *.onnx
 *.pth
 weights/
 
+# Uploaded files
+avss-module1/avss/backend/uploads/
+
 # Misc
 *.log
-.env.local

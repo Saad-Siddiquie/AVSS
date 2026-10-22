@@ -66,12 +66,12 @@ def _env_str(name: str, default: str) -> str:
 
 @dataclass
 class ModelConfig:
-    # ── Person Detector (Module 6) ──────────────────────────────────────────
-    # Pretrained: YOLOv8n (downloaded automatically by ultralytics on first use)
-    # Custom:     your own .pt file trained on your dataset
-    use_pretrained_detector: bool = True
-    pretrained_detector_weights: str = "yolov8n.pt"        # auto-downloaded (~6 MB)
-    custom_detector_weights: str = str(WEIGHTS_DIR / "avss_detector.pt")
+    # ── Face Detection (Module 7) ────────────────────────────────────────────
+    # Primary: weights/best.pt (your trained model)
+    # Fallback: weights/yolov8n-face.pt (pretrained YOLOv8-Face)
+    use_pretrained_detector: bool = False        # False = use best.pt
+    pretrained_detector_weights: str = "weights/yolov8n-face.pt"
+    custom_detector_weights: str = str(WEIGHTS_DIR / "wildtrack_best.pt")
     detector_confidence: float = 0.40
 
     # ── Face Recognition (Module 8) ─────────────────────────────────────────
@@ -121,35 +121,12 @@ MODEL_CONFIG = ModelConfig(
 
 def get_detector():
     """
-    Return the AVSS person detector.
-
-    Pretrained mode:  YOLOv8n, downloaded automatically on first use.
-    Custom mode:      Set AVSS_USE_PRETRAINED_DETECTOR=false and place your
-                      trained .pt file at AVSS_CUSTOM_DETECTOR_WEIGHTS.
-
-    Returns:
-        app.ai.detection.PersonDetector singleton
+    Return the AVSS person detector for CCTV (weights/best.pt or yolov8n person).
+    Face detection for matching uses get_face_model() + FaceDetector separately.
     """
-    from app.ai.detection import PersonDetector
-
+    from app.ai.person import PersonDetector
     cfg = MODEL_CONFIG
-    if cfg.use_pretrained_detector:
-        weights = cfg.pretrained_detector_weights          # "yolov8n.pt"
-        logger.info("[Detector] mode=pretrained weights=%s", weights)
-    else:
-        weights = cfg.custom_detector_weights
-        if not Path(weights).exists():
-            raise FileNotFoundError(
-                f"Custom detector weights not found at '{weights}'. "
-                "Train your model and place the .pt file there, "
-                "or set AVSS_USE_PRETRAINED_DETECTOR=true to use YOLOv8n."
-            )
-        logger.info("[Detector] mode=custom weights=%s", weights)
-
-    # Override the weights path on the singleton before loading
-    import app.ai.detection as _det_module
-    _det_module.YOLO_WEIGHTS = Path(weights)
-
+    logger.info("[Detector] person model conf=%.2f", cfg.detector_confidence)
     return PersonDetector.load(confidence_threshold=cfg.detector_confidence)
 
 
@@ -160,31 +137,15 @@ def get_detector():
 
 def get_face_model():
     """
-    Return the AVSS face recognition model.
-
-    Pretrained mode:  InsightFace buffalo_l (downloads ~500 MB to ~/.insightface
-                      on first use, then cached permanently).
-    Custom mode:      Set AVSS_USE_PRETRAINED_FACE=false and place your trained
-                      ArcFace .onnx file at AVSS_CUSTOM_FACE_WEIGHTS.
-
-    Returns:
-        app.ai.recognition.FaceRecognizer singleton
+    Return the AVSS face recognition model (InsightFace ArcFace buffalo_l).
+    Generates 512-dim embeddings for face crops detected by get_detector().
     """
     from app.ai.recognition import FaceRecognizer
-
     cfg = MODEL_CONFIG
-    if cfg.use_pretrained_face:
-        logger.info("[Face] mode=pretrained (InsightFace %s)", cfg.pretrained_face_model)
-    else:
-        weights = cfg.custom_face_weights
-        if not Path(weights).exists():
-            raise FileNotFoundError(
-                f"Custom face weights not found at '{weights}'. "
-                "Export your ArcFace model to ONNX and place it there, "
-                "or set AVSS_USE_PRETRAINED_FACE=true to use InsightFace."
-            )
-        logger.info("[Face] mode=custom weights=%s", weights)
-
+    logger.info(
+        "[Face] mode=%s",
+        "pretrained (InsightFace buffalo_l)" if cfg.use_pretrained_face else "custom",
+    )
     return FaceRecognizer.load()
 
 

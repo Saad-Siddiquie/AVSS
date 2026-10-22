@@ -1,184 +1,154 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { AuthHero } from "@/components/layout/AuthHero";
 import { useAuth } from "@/hooks/useAuth";
+
+const API = "/api/backend";
+
+const strength = (p: string) =>
+  [/.{8,}/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/].filter(r => r.test(p)).length;
+
+const STRENGTH_LABEL = ["Too weak", "Weak", "Fair", "Good", "Strong"];
+const STRENGTH_COLOR = [
+  "text-rose-400", "text-rose-400", "text-yellow-300",
+  "text-emerald-400", "text-emerald-400",
+];
 
 export default function RegisterPage() {
   const router = useRouter();
   const { saveToken } = useAuth();
 
-  const [form, setForm] = useState({
-    full_name: "",
-    email: "",
-    password: "",
-    confirm_password: "",
-  });
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [fullName, setFullName]   = useState("");
+  const [email, setEmail]         = useState("");
+  const [password, setPassword]   = useState("");
+  const [confirm, setConfirm]     = useState("");
+  const [error, setError]         = useState("");
+  const [loading, setLoading]     = useState(false);
+  const pwStrength = strength(password);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
-  };
+  const handleSubmit = async (ev: FormEvent) => {
+    ev.preventDefault();
+    setError("");
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    setError(null);
-
-    if (form.password !== form.confirm_password) {
-      setError("Passwords do not match.");
-      return;
-    }
-    if (form.password.length < 8) {
-      setError("Password must be at least 8 characters.");
-      return;
-    }
+    if (!fullName.trim())                         { setError("Enter your full name."); return; }
+    if (!/^\S+@\S+\.\S+$/.test(email))           { setError("Enter a valid email address."); return; }
+    if (pwStrength < 2 || password.length < 8)   { setError("Choose a stronger password (8+ characters with mixed types)."); return; }
+    if (password !== confirm)                     { setError("Passwords do not match."); return; }
 
     setLoading(true);
     try {
-      // 1 — Register
-      const regRes = await fetch("/api/backend/auth/register", {
+      const res = await fetch(`${API}/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          full_name: form.full_name.trim(),
-          email: form.email.trim(),
-          password: form.password,
-        }),
+        body: JSON.stringify({ full_name: fullName, email, password, role: "user" }),
       });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.detail || "Registration failed.");
 
-      if (!regRes.ok) {
-        const d = await regRes.json().catch(() => ({}));
-        throw new Error(d?.detail ?? `Registration failed (${regRes.status})`);
-      }
-
-      // 2 — Auto-login
-      const loginRes = await fetch("/api/backend/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: form.email.trim(), password: form.password }),
+      saveToken({
+        access_token:  data.access_token,
+        refresh_token: data.refresh_token,
+        token_type:    data.token_type,
+        user:          data.user ?? null,
       });
-
-      if (!loginRes.ok) {
-        // Registration succeeded but login failed — redirect to login page
-        router.push("/login");
-        return;
-      }
-
-      const { access_token } = await loginRes.json();
-      saveToken(access_token);
-      router.push("/");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      router.replace("/dashboard");
+    } catch (e: any) {
+      setError(e.message || "Something went wrong.");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
-      <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-        {/* Brand */}
-        <div className="mb-6 text-center">
-          <span className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-bold text-white tracking-widest">
-            AVSS
-          </span>
-          <h1 className="mt-4 text-2xl font-bold text-slate-900">Create account</h1>
-          <p className="mt-1 text-sm text-slate-500">Autonomous Video Surveillance System</p>
+    <div className="min-h-screen lg:grid lg:grid-cols-2">
+      {/* Left hero */}
+      <div className="relative h-64 lg:h-auto overflow-hidden" style={{ background: "#efe6d0" }}>
+        <AuthHero />
+        <div className="relative p-8 text-black pointer-events-none">
+          <h1 className="text-5xl font-black font-display tracking-[-0.04em]">AVSS</h1>
+          <p className="mt-2 max-w-xs text-sm text-black/70">
+            One face, hours of footage, a few minutes to find them.
+          </p>
         </div>
-
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          {/* Full name */}
-          <label className="text-sm font-medium text-slate-700">
-            Full Name
-            <input
-              name="full_name"
-              type="text"
-              value={form.full_name}
-              onChange={handleChange}
-              autoComplete="name"
-              placeholder="Ahmed Ali"
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
-            />
-          </label>
-
-          {/* Email */}
-          <label className="text-sm font-medium text-slate-700">
-            Email *
-            <input
-              name="email"
-              type="email"
-              value={form.email}
-              onChange={handleChange}
-              required
-              autoComplete="email"
-              placeholder="you@example.com"
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
-            />
-          </label>
-
-          {/* Password */}
-          <label className="text-sm font-medium text-slate-700">
-            Password *
-            <input
-              name="password"
-              type="password"
-              value={form.password}
-              onChange={handleChange}
-              required
-              autoComplete="new-password"
-              placeholder="Min. 8 characters"
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
-            />
-          </label>
-
-          {/* Confirm password */}
-          <label className="text-sm font-medium text-slate-700">
-            Confirm Password *
-            <input
-              name="confirm_password"
-              type="password"
-              value={form.confirm_password}
-              onChange={handleChange}
-              required
-              autoComplete="new-password"
-              placeholder="Re-enter password"
-              className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 ${
-                form.confirm_password && form.password !== form.confirm_password
-                  ? "border-rose-400 bg-rose-50"
-                  : "border-slate-300"
-              }`}
-            />
-            {form.confirm_password && form.password !== form.confirm_password && (
-              <span className="mt-1 block text-xs text-rose-600">Passwords do not match</span>
-            )}
-          </label>
-
-          {/* Error */}
-          {error && (
-            <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm font-medium text-rose-600">
-              {error}
-            </p>
-          )}
-
-          {/* Submit */}
-          <button
-            type="submit"
-            disabled={loading}
-            className="rounded-lg bg-slate-900 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50 transition-colors"
-          >
-            {loading ? "Creating account..." : "Create account"}
-          </button>
-        </form>
-
-        <p className="mt-4 text-center text-sm text-slate-500">
-          Already have an account?{" "}
-          <Link href="/login" className="font-medium text-slate-900 hover:underline">
-            Sign in
-          </Link>
-        </p>
       </div>
-    </main>
+
+      {/* Right form */}
+      <div className="grid place-items-center p-6">
+        <div className="w-full max-w-md">
+          <div className="avss-card p-6">
+            <h2 className="text-xl font-semibold font-display">Create account</h2>
+            <p className="text-sm text-slate-400 mb-5">Registers a standard user account.</p>
+
+            {error && (
+              <div className="rounded border border-rose-500/40 bg-rose-500/10 text-rose-200 px-4 py-3 text-sm mb-4" role="alert">
+                {error}
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+              <label className="block text-sm text-slate-300">
+                Full name
+                <input
+                  value={fullName}
+                  onChange={e => setFullName(e.target.value)}
+                  className="avss-input mt-1"
+                />
+              </label>
+
+              <label className="block text-sm text-slate-300">
+                Email
+                <input
+                  type="email"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  className="avss-input mt-1"
+                />
+              </label>
+
+              <div>
+                <label className="block text-sm text-slate-300">
+                  Password
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    className="avss-input mt-1"
+                  />
+                </label>
+                <span className={`text-xs mt-1 block ${password ? STRENGTH_COLOR[pwStrength] : "text-slate-500"}`}>
+                  {password
+                    ? STRENGTH_LABEL[pwStrength]
+                    : "Use 8+ characters, a capital, a number and a symbol"}
+                </span>
+              </div>
+
+              <label className="block text-sm text-slate-300">
+                Confirm password
+                <input
+                  type="password"
+                  value={confirm}
+                  onChange={e => setConfirm(e.target.value)}
+                  className="avss-input mt-1"
+                />
+              </label>
+
+              <button type="submit" disabled={loading} className="btn-primary w-full py-2.5">
+                {loading ? "Creating account…" : "Create account"}
+              </button>
+            </form>
+
+            <p className="text-sm mt-3 text-slate-400">
+              Already registered?{" "}
+              <Link href="/login" className="text-emerald-400 underline hover:text-emerald-300">
+                Sign in
+              </Link>
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

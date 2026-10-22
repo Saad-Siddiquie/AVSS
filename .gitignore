@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Environment secrets
+.env
+!.env.example
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+npm-debug.log*
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# AI model weights
+*.pt
+*.pth
+*.onnx
+*.engine
+*.weights
+
+# Uploaded videos and generated files
+avss-module1/avss/backend/uploads/
+runs/
+outputs/
+logs/
+results/
+
+# Training data and model artifacts
+datasets/
+data/

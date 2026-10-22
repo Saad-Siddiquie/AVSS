@@ -32,6 +32,8 @@ def _mock_face_detector():
 def _mock_face_recognizer():
     m = MagicMock()
     m.get_embedding.return_value = _FAKE_EMBEDDING
+    m.get_embedding_from_crop.return_value = _FAKE_EMBEDDING
+    m.get_embeddings_from_crops.return_value = [_FAKE_EMBEDDING]
     m.cosine_similarity = lambda a, b: float(np.dot(a, b))
     return m
 
@@ -47,7 +49,7 @@ def _mock_face_search_index():
 def mock_ai_models():
     """Patch all AI singletons for the entire test session."""
     with (
-        patch("app.ai.detection.PersonDetector.load", return_value=_mock_person_detector()),
+        patch("app.ai.person.PersonDetector.load", return_value=_mock_person_detector()),
         patch("app.ai.face.FaceDetector.load", return_value=_mock_face_detector()),
         patch("app.ai.recognition.FaceRecognizer.load", return_value=_mock_face_recognizer()),
         patch("app.ai.search.FaceSearchIndex.load", return_value=_mock_face_search_index()),

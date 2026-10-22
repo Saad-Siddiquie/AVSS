@@ -25,6 +25,7 @@ class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
     refresh_token: Optional[str] = None
+    user: Optional["UserRead"] = None  # returned on login/register so frontend knows role immediately
 
 
 class TokenData(BaseModel):

@@ -1,4 +1,4 @@
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -36,7 +36,7 @@ def authenticate_user(db: Session, email: str, password: str) -> Optional[User]:
     return user
 
 
-def create_tokens_for_user(user: User) -> str:
+def create_tokens_for_user(user: User) -> tuple[str, str]:
     access = create_access_token(subject=user.email)
     refresh = create_refresh_token(subject=user.email)
     return access, refresh

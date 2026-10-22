@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Boolean
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.core.database import Base
 
@@ -17,4 +17,5 @@ class RefreshToken(Base):
     user = relationship("User")
 
     def is_expired(self) -> bool:
-        return datetime.utcnow() >= self.expires_at
+        # Use offset-naive comparison (expires_at stored without tz)
+        return datetime.now(timezone.utc).replace(tzinfo=None) >= self.expires_at

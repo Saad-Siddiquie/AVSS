@@ -1,35 +1,43 @@
-# ── Web framework ────────────────────────────────────────────────────────────
+# ── Web framework ─────────────────────────────────────────────────────────────
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
 python-multipart==0.0.9
 
-# ── Database ──────────────────────────────────────────────────────────────────
+# ── Database ───────────────────────────────────────────────────────────────────
 sqlalchemy==2.0.35
 psycopg2-binary==2.9.9
 alembic==1.13.3
 
-# ── Settings / validation ─────────────────────────────────────────────────────
+# ── Settings / validation ──────────────────────────────────────────────────────
 pydantic==2.9.2
 pydantic-settings==2.5.2
 email-validator==2.2.0
 python-dotenv==1.0.1
 
-# ── Auth ──────────────────────────────────────────────────────────────────────
+# ── Auth ───────────────────────────────────────────────────────────────────────
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 
-# ── Computer Vision — Module 5 (Video Processing) ────────────────────────────
+# ── Computer Vision (OpenCV + NumPy) ──────────────────────────────────────────
 opencv-python==4.10.0.84
 numpy==1.26.4
 
-# ── Person Detection — Module 6 (YOLOv8) ────────────────────────────────────
-# Downloads yolov8n.pt (~6 MB) automatically on first use
+# ── Face Detection — YOLOv8n-Face ─────────────────────────────────────────────
+# ultralytics runs YOLOv8n-face.pt (downloaded from HuggingFace on first use ~6 MB)
+# Much better than OpenCV DNN for CCTV angles, small/partial faces
 ultralytics==8.2.103
 
-# ── Face Recognition — Module 8 (InsightFace) ────────────────────────────────
-# Downloads buffalo_l model (~500 MB) to ~/.insightface on first use
+# ── Face Recognition — InsightFace ArcFace (buffalo_l) ────────────────────────
+# Downloads ~500 MB to ~/.insightface on first use
 insightface==0.7.3
 onnxruntime==1.19.2
 
-# ── Similarity Search — Module 10 (FAISS) ────────────────────────────────────
+# ── Similarity Search — FAISS ─────────────────────────────────────────────────
 faiss-cpu==1.8.0
+
+# ── Multi-Object Tracking — ByteTrack ─────────────────────────────────────────
+supervision==0.21.0
+
+# ── Video encoding (H.264 for browser playback) ───────────────────────────────
+# imageio-ffmpeg ships a static ffmpeg binary — no system ffmpeg needed
+imageio-ffmpeg>=0.5.1
