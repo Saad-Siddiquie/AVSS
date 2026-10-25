@@ -12,6 +12,7 @@ class CameraCreate(BaseModel):
     url: str
     camera_type: str
     location: Optional[str] = None
+    description: Optional[str] = None
     status: Optional[str] = "inactive"
 
     @field_validator("camera_type")
@@ -35,6 +36,7 @@ class CameraUpdate(BaseModel):
     url: Optional[str] = None
     camera_type: Optional[str] = None
     location: Optional[str] = None
+    description: Optional[str] = None
     status: Optional[str] = None
     is_active: Optional[bool] = None
 
@@ -62,6 +64,7 @@ class CameraRead(BaseModel):
     url: str
     camera_type: str
     location: Optional[str]
+    description: Optional[str] = None
     status: str
     is_active: bool
     created_at: Optional[datetime]

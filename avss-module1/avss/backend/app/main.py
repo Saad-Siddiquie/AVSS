@@ -29,6 +29,10 @@ from app.api import health
 from app.api import auth as auth_api
 from app.api import cameras as cameras_api
 from app.api import pipeline as pipeline_api
+from app.api import stats as stats_api
+from app.api import gallery as gallery_api
+from app.api import alerts as alerts_api
+from app.api import settings as settings_api
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,6 +58,19 @@ async def lifespan(app: FastAPI):
         load_all_models()
     except Exception as e:
         logger.error("AI model loading error: %s", e)
+
+    # ── Supabase Storage — ensure bucket exists ───────────────────────────
+    try:
+        from app.services.supabase_storage import ensure_bucket_exists
+        from app.core.config import settings as _s
+        if _s.supabase_enabled:
+            ok = ensure_bucket_exists()
+            if ok:
+                logger.info("[✓] Supabase Storage bucket ready: %s", _s.SUPABASE_STORAGE_BUCKET)
+        else:
+            logger.info("[!] Supabase not configured — videos stored locally only.")
+    except Exception as e:
+        logger.warning("Supabase init warning: %s", e)
 
     yield
 
@@ -86,6 +103,10 @@ app.include_router(health.router,        prefix=settings.API_PREFIX)
 app.include_router(auth_api.router,      prefix=settings.API_PREFIX)
 app.include_router(cameras_api.router,   prefix=settings.API_PREFIX)
 app.include_router(pipeline_api.router,  prefix=settings.API_PREFIX)
+app.include_router(stats_api.router,     prefix=settings.API_PREFIX)
+app.include_router(gallery_api.router,   prefix=settings.API_PREFIX)
+app.include_router(alerts_api.router,    prefix=settings.API_PREFIX)
+app.include_router(settings_api.router,  prefix=settings.API_PREFIX)
 
 
 @app.get("/", tags=["Root"])
@@ -94,14 +115,19 @@ def root():
         "message": "AVSS API is running",
         "docs": "/docs",
         "version": "1.0.0",
-        "workflow": [
-            "POST /api/v1/pipeline/process/upload  — Upload video",
-            "POST /api/v1/pipeline/process/camera  — Use registered camera",
-            "GET  /api/v1/pipeline/jobs/{id}        — Poll processing status",
-            "POST /api/v1/pipeline/search           — Upload query photo",
-            "GET  /api/v1/pipeline/search/{id}      — Poll search status",
-            "GET  /api/v1/pipeline/video/{file}     — Stream annotated video",
-        ],
+        "routes": {
+            "auth":     ["/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/auth/me", "/api/v1/auth/setup-admin"],
+            "cameras":  ["/api/v1/cameras"],
+            "pipeline": ["/api/v1/pipeline/process/upload", "/api/v1/pipeline/process/camera",
+                         "/api/v1/pipeline/jobs", "/api/v1/pipeline/search",
+                         "/api/v1/pipeline/search/all", "/api/v1/pipeline/video/{filename}"],
+            "stats":    ["/api/v1/stats"],
+            "gallery":  ["/api/v1/gallery", "/api/v1/gallery/{job_id}"],
+            "alerts":   ["/api/v1/alerts", "/api/v1/alerts/{id}/read", "/api/v1/alerts/read-all"],
+            "settings": ["/api/v1/settings", "/api/v1/settings/status"],
+            "admin":    ["/api/v1/admin/users"],
+            "health":   ["/api/v1/health"],
+        },
     }
 
 

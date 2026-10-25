@@ -16,6 +16,7 @@ class Camera(Base):
     url = Column(String(500), nullable=False)          # RTSP URL, device path, or file path
     camera_type = Column(String(20), nullable=False)   # rtsp | webcam | file
     location = Column(String(200), nullable=True)      # Physical location description
+    description = Column(String(500), nullable=True)   # Optional notes
     status = Column(String(20), nullable=False, default="inactive")  # active | inactive | error
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

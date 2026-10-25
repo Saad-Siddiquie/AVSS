@@ -1,17 +1,31 @@
 import logging
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+_IS_SQLITE = settings.DATABASE_URL.startswith("sqlite")
 
 engine = create_engine(
     settings.DATABASE_URL,
     pool_pre_ping=True,
-    connect_args={"check_same_thread": False} if "sqlite" in settings.DATABASE_URL else {},
+    connect_args=(
+        {"check_same_thread": False, "timeout": 30}
+        if _IS_SQLITE
+        else {}
+    ),
 )
+
+if _IS_SQLITE:
+    @event.listens_for(engine, "connect")
+    def _configure_sqlite_connection(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA busy_timeout = 30000")
+        cursor.execute("PRAGMA synchronous = NORMAL")
+        cursor.close()
+
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -53,6 +67,9 @@ def ensure_schema(base) -> None:
         base.metadata.create_all(bind=engine)
         logger.info("PostgreSQL: created any missing tables.")
         return
+
+    with engine.connect() as conn:
+        conn.exec_driver_sql("PRAGMA journal_mode = WAL")
 
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())

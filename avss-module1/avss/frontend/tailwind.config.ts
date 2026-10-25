@@ -9,54 +9,27 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        // Display: headings, sidebar brand
-        display: ["'Bricolage Grotesque'", "sans-serif"],
-        // Body
-        sans: ["'Instrument Sans'", "system-ui", "sans-serif"],
+        display: ["'Sora'", "system-ui", "sans-serif"],
+        sans:    ["'Inter'", "system-ui", "sans-serif"],
       },
       colors: {
-        // ── AVSS custom palette (matches the demo HTML) ─────────────────
-        slate: {
-          100: "#f2ead7",
-          200: "#e6dcc3",
-          300: "#d3c8ad",
-          400: "#a39e8c",
-          500: "#7c7f76",
-          600: "#46524e",
-          700: "#2d3835",
-          800: "#171e1c",
-          900: "#0f1413",
-          950: "#090c0b",
-        },
-        emerald: {
-          300: "#7fd6c9",
-          400: "#3fbfae",
-          500: "#1fa593",
-          600: "#13826f",
-        },
-        orange: {
-          300: "#eadcb4",
-          400: "#dccb96",
-          500: "#cdb97a",
-          600: "#b89f5c",
-        },
-        // keep existing token names working
-        border: "hsl(var(--border))",
-        background: "hsl(var(--background))",
-        foreground: "hsl(var(--foreground))",
+        bg:      "var(--color-bg)",
+        panel:   "var(--color-panel)",
+        "panel-2": "var(--color-panel-2)",
+        edge:    "var(--color-edge)",
+        accent:  "var(--color-accent)",
+        violet:  "var(--color-violet)",
+        cyan:    "var(--color-cyan)",
+        ok:      "var(--color-ok)",
+        warn:    "var(--color-warn)",
+        danger:  "var(--color-danger)",
+        mute:    "var(--color-mute)",
       },
       borderRadius: {
-        none: "0",
-        sm: "2px",
-        DEFAULT: "2px",
-        md: "2px",
-        lg: "2px",
-        xl: "2px",
-        "2xl": "2px",
-        full: "9999px",
-      },
-      boxShadow: {
-        tag: "5px 5px 0 #13826f",
+        DEFAULT: "10px",
+        xl:      "14px",
+        "2xl":   "18px",
+        full:    "9999px",
       },
     },
   },

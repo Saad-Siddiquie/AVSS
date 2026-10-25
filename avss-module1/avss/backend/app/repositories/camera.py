@@ -43,6 +43,7 @@ def create(db: Session, payload: CameraCreate) -> Camera:
         url=payload.url,
         camera_type=payload.camera_type,
         location=payload.location,
+        description=getattr(payload, "description", None),
         status=payload.status or "inactive",
     )
     db.add(camera)

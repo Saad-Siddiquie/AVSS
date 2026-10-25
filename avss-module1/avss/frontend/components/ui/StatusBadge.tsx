@@ -1,22 +1,22 @@
 const MAP: Record<string, string> = {
-  pending:    "bg-yellow-500/15 text-yellow-300",
-  processing: "bg-blue-500/15 text-blue-300 animate-pulse",
-  searching:  "bg-blue-500/15 text-blue-300 animate-pulse",
-  completed:  "bg-emerald-500/15 text-emerald-300",
-  failed:     "bg-rose-500/15 text-rose-300",
-  active:     "bg-emerald-500/15 text-emerald-300",
-  inactive:   "bg-slate-500/15 text-slate-400",
-  admin:      "bg-orange-500/15 text-orange-300",
-  user:       "bg-blue-500/15 text-blue-300",
-  rtsp:       "bg-blue-500/15 text-blue-300",
-  webcam:     "bg-emerald-500/15 text-emerald-300",
-  file:       "bg-purple-500/15 text-purple-300",
+  pending:    "bg-warn/15 text-warn",
+  processing: "bg-accent/15 text-accent animate-pulse",
+  searching:  "bg-accent/15 text-accent animate-pulse",
+  completed:  "bg-ok/15 text-ok",
+  failed:     "bg-danger/15 text-danger",
+  active:     "bg-ok/15 text-ok",
+  inactive:   "bg-mute/15 text-mute",
+  admin:      "bg-warn/15 text-warn",
+  user:       "bg-accent/15 text-accent",
+  rtsp:       "bg-accent/15 text-accent",
+  webcam:     "bg-ok/15 text-ok",
+  file:       "bg-violet/15 text-violet",
 };
 
 export function StatusBadge({ status }: { status: string }) {
-  const cls = MAP[status.toLowerCase()] ?? "bg-slate-700 text-slate-300";
+  const cls = MAP[status?.toLowerCase()] ?? "bg-mute/15 text-mute";
   return (
-    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${cls}`}>
+    <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${cls}`}>
       {status}
     </span>
   );

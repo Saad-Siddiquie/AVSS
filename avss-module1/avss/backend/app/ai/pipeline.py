@@ -9,7 +9,7 @@ Stage 1: process_video(job_id, db)
 
 Stage 2: search_and_track(query_id, db)
   Reads query image → generates face embedding →
-  searches unique track embeddings via cached numpy index (fast) →
+    compares face embeddings only via cached numpy index (fast) →
   loads timeline rows only for matched tracks →
   renders a short clip of matched frames only (seek-based, no full re-encode).
 
@@ -290,29 +290,208 @@ def process_video(job_id: int, db: Session) -> dict:
 # Stage 2 — Search and render annotated video
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _camera_info_for_job(job: VideoJob, db: Session) -> tuple[str, str, Optional[int]]:
+    camera_name = job.original_filename or "Uploaded Video"
+    camera_location = "—"
+    camera_id = job.camera_id
+    if job.camera_id:
+        from app.models.camera import Camera
+        cam = db.query(Camera).filter(Camera.id == job.camera_id).first()
+        if cam:
+            camera_name = cam.name
+            camera_location = cam.location or "—"
+    return camera_name, camera_location, camera_id
+
+
+def _combined_track_scores_with_db(
+    job: VideoJob,
+    query_emb: np.ndarray,
+    db: Session,
+) -> tuple[list[int], dict[int, float]]:
+    track_ids, emb_matrix = _load_job_track_index(job.id, db)
+    if len(track_ids) == 0:
+        return [], {}
+    sims = emb_matrix @ query_emb
+    # Searches use a face photo; full-body and face-crop embeddings are not comparable.
+    return track_ids, {
+        int(tid): float(sims[idx])
+        for idx, tid in enumerate(track_ids)
+    }
+
+
+def _pick_matched_tracks(combined_sims: dict[int, float], threshold: float) -> tuple[set[int], float]:
+    if not combined_sims:
+        return set(), 0.0
+    sorted_tracks = sorted(combined_sims.items(), key=lambda x: x[1], reverse=True)
+    best_tid, best_score = sorted_tracks[0]
+    if best_score < threshold:
+        return set(), best_score
+    adaptive_cutoff = max(threshold, best_score - SEARCH_RELATIVE_GAP)
+    matched = {tid for tid, score in combined_sims.items() if score >= adaptive_cutoff}
+    return matched, best_score
+
+
+def _search_one_job(
+    job: VideoJob,
+    query: SearchQuery,
+    query_emb: np.ndarray,
+    db: Session,
+    output_path: Optional[Path] = None,
+) -> Optional[dict]:
+    """Search a single completed job; render clip if matched. Returns hit dict or None."""
+    _, combined_sims = _combined_track_scores_with_db(job, query_emb, db)
+    if not combined_sims:
+        return None
+
+    matched_track_ids, best_score = _pick_matched_tracks(
+        combined_sims, query.similarity_threshold,
+    )
+    if not matched_track_ids:
+        return None
+
+    match_rows = (
+        db.query(DetectionLog)
+        .filter(
+            DetectionLog.job_id == job.id,
+            DetectionLog.track_id.in_(matched_track_ids),
+        )
+        .order_by(DetectionLog.timestamp_ms)
+        .all()
+    )
+    if not match_rows:
+        return None
+
+    track_best_sim = {tid: combined_sims[tid] for tid in matched_track_ids}
+    camera_name, camera_location, camera_id = _camera_info_for_job(job, db)
+
+    timeline = [
+        {
+            "frame_index": log.frame_index,
+            "timestamp_ms": log.timestamp_ms,
+            "timestamp_str": _ms_to_str(log.timestamp_ms),
+            "track_id": log.track_id,
+            "similarity": round(track_best_sim.get(log.track_id, 0.0), 4),
+            "x1": log.x1, "y1": log.y1,
+            "x2": log.x2, "y2": log.y2,
+        }
+        for log in match_rows
+    ]
+
+    if output_path is None:
+        output_path = OUTPUT_DIR / f"search_{query.id}_job_{job.id}.mp4"
+    _render_matched_clip(
+        source_path=job.source_path,
+        match_rows=match_rows,
+        match_sims=track_best_sim,
+        output_path=output_path,
+        fps=PIPELINE_TARGET_FPS,
+        camera_name=camera_name,
+        camera_location=camera_location,
+    )
+
+    return {
+        "job_id": job.id,
+        "camera_id": camera_id,
+        "camera_name": camera_name,
+        "camera_location": camera_location,
+        "total_matches": len(timeline),
+        "best_similarity": round(best_score, 4),
+        "first_seen": timeline[0]["timestamp_str"],
+        "last_seen": timeline[-1]["timestamp_str"],
+        "output_video_path": str(output_path),
+        "output_video_url": f"/api/v1/pipeline/video/{output_path.name}",
+        "timeline": timeline[:50],
+    }
+
+
+def _search_all_jobs(query: SearchQuery, query_emb: np.ndarray, db: Session) -> dict:
+    """Search every completed video job (all cameras / uploads)."""
+    jobs = (
+        db.query(VideoJob)
+        .filter(VideoJob.status == "completed")
+        .order_by(VideoJob.id.desc())
+        .all()
+    )
+    logger.info("Query %d: searching %d completed job(s) across all sources", query.id, len(jobs))
+
+    hits: list[dict] = []
+    for job in jobs:
+        try:
+            hit = _search_one_job(job, query, query_emb, db)
+            if hit:
+                hits.append(hit)
+                logger.info(
+                    "  ✓ job %d — %s @ %s — %d matches (best=%.3f)",
+                    job.id, hit["camera_name"], hit["camera_location"],
+                    hit["total_matches"], hit["best_similarity"],
+                )
+        except Exception as exc:
+            logger.warning("Search skipped for job %d: %s", job.id, exc)
+
+    total_matches = sum(h["total_matches"] for h in hits)
+    query.results_json = json.dumps(hits)
+    query.total_matches = total_matches
+    query.status = "completed"
+    query.completed_at = datetime.now(timezone.utc)
+
+    if len(hits) == 1:
+        query.output_video_path = hits[0]["output_video_path"]
+
+    # ── Upload to Supabase Storage ────────────────────────────────────────────
+    try:
+        from app.services.supabase_storage import upload_search_video, upload_query_image
+        from pathlib import Path as _Path
+
+        # Upload query image
+        q_url = upload_query_image(_Path(query.query_image_path), query.id)
+        if q_url:
+            query.query_image_url = q_url
+
+        # Upload each output video (use the first one for the main URL)
+        for hit in hits:
+            if hit.get("output_video_path"):
+                vid_url = upload_search_video(_Path(hit["output_video_path"]), query.id)
+                if vid_url:
+                    hit["supabase_video_url"] = vid_url
+                    if not query.supabase_video_url:
+                        query.supabase_video_url = vid_url
+
+        # Re-save results_json with Supabase URLs included
+        query.results_json = json.dumps(hits)
+
+        # Generate human-readable search ref ID
+        query.search_ref_id = f"AVSS-SEARCH-{query.id:04d}"
+        logger.info("Supabase upload complete for query %d", query.id)
+    except Exception as sup_err:
+        logger.warning("Supabase upload skipped: %s", sup_err)
+
+    db.commit()
+
+    return {
+        "query_id": query.id,
+        "search_scope": "all_cameras",
+        "total_matches": total_matches,
+        "cameras_matched": len(hits),
+        "hits": hits,
+    }
+
+
 def search_and_track(query_id: int, db: Session) -> dict:
     """
-    Find a person in a processed video using their face photo.
+    Find a person using a query face photo.
 
-    Fast path:
-      1. Compare query against one embedding per ByteTrack ID (not every frame)
-      2. Load timeline rows only for matched tracks
-      3. Render a short clip of matched frames (seek-based)
+    job_id NULL  → search all completed jobs (every camera / upload).
+    job_id set   → search that job only.
     """
     query = db.query(SearchQuery).filter(SearchQuery.id == query_id).first()
     if not query:
         raise ValueError(f"SearchQuery id={query_id} not found.")
-
-    job = db.query(VideoJob).filter(VideoJob.id == query.job_id).first()
-    if not job or job.status != "completed":
-        raise ValueError(f"VideoJob id={query.job_id} is not ready.")
 
     query.status = "processing"
     db.commit()
 
     try:
         face_recognizer = FaceRecognizer.load()
-
         query_img = cv2.imread(query.query_image_path)
         if query_img is None:
             raise ValueError(f"Cannot read query image: {query.query_image_path}")
@@ -327,155 +506,60 @@ def search_and_track(query_id: int, db: Session) -> dict:
         query.query_embedding = json.dumps(query_emb.tolist())
         db.commit()
 
-        threshold = query.similarity_threshold
+        if query.job_id is None:
+            return _search_all_jobs(query, query_emb, db)
 
-        track_ids, emb_matrix = _load_job_track_index(job.id, db)
-        if len(track_ids) == 0:
+        job = db.query(VideoJob).filter(VideoJob.id == query.job_id).first()
+        if not job or job.status != "completed":
+            raise ValueError(f"VideoJob id={query.job_id} is not ready.")
+
+        out = OUTPUT_DIR / f"search_{query_id}.mp4"
+        hit = _search_one_job(job, query, query_emb, db, output_path=out)
+        if not hit:
             _finalize_empty_search(query, db)
-            return {"query_id": query_id, "total_matches": 0}
-
-        # ── Face similarity (primary signal — ArcFace) ────────────────────────
-        sims = emb_matrix @ query_emb
-
-        # ── OSNet body similarity (secondary signal) ──────────────────────────
-        body_sims: dict[int, float] = {}
-        try:
-            from app.ai.reid import PersonReID, OSNET_WEIGHTS
-            npy_path, _ = _job_index_paths(job.id)
-            body_npy = Path(str(npy_path).replace("_tracks.npy", "_tracks_body.npy"))
-            body_ids_json = Path(str(npy_path).replace("_tracks.npy", "_tracks_body.json"))
-
-            if OSNET_WEIGHTS.exists() and body_npy.exists() and body_ids_json.exists():
-                reid_model = PersonReID.load()
-                query_body_emb = reid_model.get_embedding(query_img)
-                if query_body_emb is not None:
-                    body_matrix = np.load(str(body_npy))
-                    body_track_ids = json.loads(body_ids_json.read_text())
-                    body_scores = body_matrix @ query_body_emb
-                    body_sims = {int(tid): float(s) for tid, s in zip(body_track_ids, body_scores)}
-                    logger.info("OSNet body scoring: %d tracks", len(body_sims))
-        except Exception as exc:
-            logger.warning("OSNet body scoring skipped: %s", exc)
-
-        # ── Combined score: 0.7 × face + 0.3 × body (or face only) ───────────
-        combined_sims: dict[int, float] = {}
-        for idx, tid in enumerate(track_ids):
-            face_s = float(sims[idx])
-            body_s = body_sims.get(int(tid))
-            combined_sims[int(tid)] = (0.7 * face_s + 0.3 * body_s) if body_s is not None else face_s
-
-        sorted_tracks = sorted(combined_sims.items(), key=lambda x: x[1], reverse=True)
-
-        # Log top 5 for tuning
-        logger.info("Top combined scores (threshold=%.2f):", threshold)
-        for tid, score in sorted_tracks[:5]:
-            face_s = combined_sims[tid]
-            body_s = body_sims.get(tid)
-            logger.info(
-                "  track_id=%d  combined=%.4f  face=%.4f  body=%s  %s",
-                tid, score, face_s,
-                f"{body_s:.4f}" if body_s is not None else "N/A",
-                "✓" if score >= threshold else "✗",
-            )
-
-        best_tid, best_score = sorted_tracks[0] if sorted_tracks else (None, 0.0)
-
-        if best_score < threshold:
-            logger.info("No match: best=%.4f below threshold=%.2f", best_score, threshold)
-            _finalize_empty_search(query, db)
-            return {"query_id": query_id, "total_matches": 0}
-
-        # Only accept tracks close to the best match (avoids false positives)
-        adaptive_cutoff = max(threshold, best_score - SEARCH_RELATIVE_GAP)
-        matched_track_ids = {
-            tid for tid, score in combined_sims.items()
-            if score >= adaptive_cutoff
-        }
-        logger.info(
-            "Match filter: best=%.4f cutoff=%.4f → %d track(s) matched",
-            best_score, adaptive_cutoff, len(matched_track_ids),
-        )
-
-        if not matched_track_ids:
-            _finalize_empty_search(query, db)
-            return {"query_id": query_id, "total_matches": 0}
-
-        match_rows = (
-            db.query(DetectionLog)
-            .filter(
-                DetectionLog.job_id == job.id,
-                DetectionLog.track_id.in_(matched_track_ids),
-            )
-            .order_by(DetectionLog.timestamp_ms)
-            .all()
-        )
-
-        track_best_sim = {tid: combined_sims[tid] for tid in matched_track_ids}
-
-        camera_name = "Uploaded Video"
-        camera_location = "—"
-        if job.camera_id:
-            from app.models.camera import Camera
-            cam = db.query(Camera).filter(Camera.id == job.camera_id).first()
-            if cam:
-                camera_name = cam.name
-                camera_location = cam.location or "—"
-        elif job.original_filename:
-            camera_name = job.original_filename
-
-        timeline = [
-            {
-                "frame_index": log.frame_index,
-                "timestamp_ms": log.timestamp_ms,
-                "timestamp_str": _ms_to_str(log.timestamp_ms),
-                "track_id": log.track_id,
-                "similarity": round(track_best_sim.get(log.track_id, 0.0), 4),
-                "x1": log.x1, "y1": log.y1,
-                "x2": log.x2, "y2": log.y2,
-                "camera_id": job.camera_id,
-                "camera_name": camera_name,
-                "camera_location": camera_location,
-            }
-            for log in match_rows
-        ]
-
-        logger.info(
-            "Query %d: %d matches, %d unique track IDs — camera: %s",
-            query_id, len(timeline), len(matched_track_ids), camera_name,
-        )
-
-        # Update DB so frontend knows rendering has started (not stuck)
-        query.total_matches = len(timeline)
-        db.commit()
-
-        output_path = OUTPUT_DIR / f"search_{query_id}.mp4"
-        logger.info("Query %d: rendering annotated clip (~%d frames)...", query_id, len(match_rows))
-        _render_matched_clip(
-            source_path=job.source_path,
-            match_rows=match_rows,
-            match_sims=track_best_sim,
-            output_path=output_path,
-            fps=PIPELINE_TARGET_FPS,
-            camera_name=camera_name,
-            camera_location=camera_location,
-        )
-        logger.info("Query %d: render complete → %s", query_id, output_path)
+            return {"query_id": query_id, "total_matches": 0, "search_scope": "single"}
 
         query.status = "completed"
-        query.total_matches = len(timeline)
-        query.output_video_path = str(output_path)
+        query.total_matches = hit["total_matches"]
+        query.output_video_path = hit["output_video_path"]
+        query.results_json = json.dumps([hit])
         query.completed_at = datetime.now(timezone.utc)
+
+        # ── Upload to Supabase Storage ────────────────────────────────────
+        try:
+            from app.services.supabase_storage import upload_search_video, upload_query_image
+            from pathlib import Path as _Path
+
+            q_url = upload_query_image(_Path(query.query_image_path), query.id)
+            if q_url:
+                query.query_image_url = q_url
+
+            if hit.get("output_video_path"):
+                vid_url = upload_search_video(_Path(hit["output_video_path"]), query.id)
+                if vid_url:
+                    query.supabase_video_url = vid_url
+                    hit["supabase_video_url"] = vid_url
+                    query.results_json = json.dumps([hit])
+
+            query.search_ref_id = f"AVSS-SEARCH-{query.id:04d}"
+            query.source_name   = hit.get("camera_name") or hit.get("source_file")
+            logger.info("Supabase upload complete for query %d", query.id)
+        except Exception as sup_err:
+            logger.warning("Supabase upload skipped: %s", sup_err)
+
         db.commit()
 
         return {
             "query_id": query_id,
-            "total_matches": len(timeline),
-            "matched_track_ids": list(matched_track_ids),
-            "camera_name": camera_name,
-            "camera_location": camera_location,
-            "camera_id": job.camera_id,
-            "output_video_path": str(output_path),
-            "timeline": timeline[:100],
+            "search_scope": "single",
+            "total_matches": hit["total_matches"],
+            "camera_name": hit["camera_name"],
+            "camera_location": hit["camera_location"],
+            "camera_id": hit["camera_id"],
+            "output_video_path": hit["output_video_path"],
+            "supabase_video_url": query.supabase_video_url,
+            "hits": [hit],
+            "timeline": hit["timeline"],
         }
 
     except Exception as exc:

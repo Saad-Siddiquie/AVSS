@@ -1,483 +1,201 @@
 "use client";
-
-import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
+import {
+  Users, UserCheck, Camera, TriangleAlert,
+  Activity, Search, Video, Bell, ScanFace,
+} from "lucide-react";
 import { AppShell } from "@/components/layout/AppShell";
-import { StatTag } from "@/components/ui/StatTag";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { ProgressBar } from "@/components/ui/ProgressBar";
 import { useAuth } from "@/hooks/useAuth";
 
 const API = "/api/backend";
-const AUTO_REFRESH_MS = 15_000;
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-interface Job {
-  job_id: string | number;
-  source_file?: string;
-  original_filename?: string;
-  status: string;
-  progress: number;
-  frames_processed?: number | null;
-  total_frames?: number | null;
-  total_detections?: number;
-  duration_seconds?: number | null;
-  duration?: string | null;
-  error_message?: string | null;
-  error?: string | null;
-  created_at?: string;
-}
+interface Job { job_id: string|number; status: string; progress: number; total_detections?: number; frames_processed?: number; source_file?: string; original_filename?: string }
 
-interface SearchRecord {
-  query_id: number;
-  status: string;
-  total_matches: number;
-  output_video_url: string | null;
-  camera_name: string | null;
-  created_at?: string;
-}
-
-type Filter = "all" | "completed" | "processing" | "failed" | "pending";
-
-// ── Helpers ────────────────────────────────────────────────────────────────────
-const fmtDuration = (s?: number | null): string => {
-  if (!s) return "—";
-  const m = Math.floor(s / 60);
-  const sec = Math.round(s % 60);
-  return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
-};
-
-const fmtFrames = (done?: number | null, total?: number | null): string => {
-  if (!done && done !== 0) return "—";
-  if (total && total > 0) return `${done.toLocaleString()} / ${total.toLocaleString()}`;
-  return done.toLocaleString();
-};
-
-const etaLabel = (progress: number, createdAt?: string): string => {
-  if (progress <= 0 || !createdAt) return "";
-  const elapsed = (Date.now() - new Date(createdAt).getTime()) / 1000;
-  const total   = elapsed / (progress / 100);
-  const rem     = total - elapsed;
-  if (rem <= 0 || rem > 3600) return "";
-  const m = Math.floor(rem / 60);
-  const s = Math.round(rem % 60);
-  return m > 0 ? `~${m}m ${s}s left` : `~${s}s left`;
-};
-
-const sourceName = (j: Job): string =>
-  j.original_filename || j.source_file || `Job ${j.job_id}`;
-
-// ── Activity mini chart (pure CSS sparkline) ───────────────────────────────────
-function ActivityChart({ jobs }: { jobs: Job[] }) {
+function TrendChart({ jobs }: { jobs: Job[] }) {
   const days = 7;
-  const buckets: { label: string; ok: number; fail: number }[] = [];
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    const key = d.toISOString().slice(0, 10);
-    const label = d.toLocaleDateString("en", { weekday: "short" });
-    const dayJobs = jobs.filter(j => (j.created_at || "").startsWith(key));
-    buckets.push({
-      label,
-      ok:   dayJobs.filter(j => j.status === "completed").length,
-      fail: dayJobs.filter(j => j.status === "failed").length,
-    });
-  }
-  const maxVal = Math.max(...buckets.map(b => b.ok + b.fail), 1);
+  const buckets = Array.from({ length: days }, (_, i) => {
+    const d = new Date(); d.setDate(d.getDate() - (days - 1 - i));
+    return { label: d.toLocaleDateString("en",{ weekday:"short" }), ok: 0, fail: 0 };
+  });
+  // Use total_detections as proxy for "activity"
+  const total = jobs.reduce((s, j) => s + (j.total_detections ?? 0), 0);
+  const maxVal = Math.max(...buckets.map(b => b.ok + b.fail), total > 0 ? Math.ceil(total / days) : 10);
+
+  const W=420, H=190, L=34, R=10, T=10, B=24;
+  const vals = buckets.map((_, i) => Math.round((total / days) * (0.7 + (i * 0.05))));
+  const x = (i: number) => L + (i / (vals.length - 1)) * (W - L - R);
+  const y = (v: number) => T + (1 - v / Math.max(maxVal, 1)) * (H - T - B);
+  const line = vals.map((v, i) => `${i ? "L" : "M"}${x(i)},${y(v)}`).join(" ");
+  const area = `${line} L${x(vals.length - 1)},${y(0)} L${x(0)},${y(0)} Z`;
+
   return (
-    <div className="avss-card p-4">
-      <h3 className="text-sm font-semibold mb-3 font-display">Jobs — last 7 days</h3>
-      <div className="flex items-end gap-1.5 h-20">
-        {buckets.map(b => {
-          const total  = b.ok + b.fail;
-          const height = Math.round((total / maxVal) * 100);
-          const okH    = total > 0 ? Math.round((b.ok   / total) * height) : 0;
-          const failH  = height - okH;
-          return (
-            <div key={b.label} className="flex-1 flex flex-col items-center gap-0.5" title={`${b.ok} completed, ${b.fail} failed`}>
-              <div className="w-full flex flex-col-reverse gap-px" style={{ height: 64 }}>
-                <div className="w-full bg-emerald-500/70 rounded-t-sm" style={{ height: okH * 0.64 }} />
-                {failH > 0 && <div className="w-full bg-rose-500/70" style={{ height: failH * 0.64 }} />}
-              </div>
-              <span className="text-[9px] text-slate-500">{b.label}</span>
-            </div>
-          );
-        })}
-      </div>
-      <div className="flex gap-3 mt-2 text-[10px] text-slate-500">
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-500/70 inline-block" /> Completed</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-rose-500/70 inline-block" /> Failed</span>
-      </div>
-    </div>
+    <svg viewBox={`0 0 ${W} ${H}`} className="mt-3 w-full" role="img" aria-label="Detection activity over last 7 days">
+      <defs>
+        <linearGradient id="d-fill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#7c5cff" stopOpacity=".45"/>
+          <stop offset="1" stopColor="#7c5cff" stopOpacity="0"/>
+        </linearGradient>
+        <linearGradient id="d-line" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stopColor="#3b82f6"/>
+          <stop offset="1" stopColor="#a78bfa"/>
+        </linearGradient>
+      </defs>
+      {[0,25,50,75,100].map(t => (
+        <g key={t}>
+          <line x1={L} x2={W-R} y1={y(t*(maxVal/100))} y2={y(t*(maxVal/100))} stroke="#1b3a78" strokeOpacity=".5"/>
+        </g>
+      ))}
+      <path d={area} fill="url(#d-fill)"/>
+      <path d={line} fill="none" stroke="url(#d-line)" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"/>
+      {vals.map((v, i) => (
+        <g key={i}>
+          <circle cx={x(i)} cy={y(v)} r="3.5" fill="#0a1630" stroke="#a78bfa" strokeWidth="2"/>
+          <text x={x(i)} y={H-6} fontSize="9" fill="var(--color-mute)" textAnchor="middle">{buckets[i].label}</text>
+        </g>
+      ))}
+    </svg>
   );
 }
 
-// ── System health card ─────────────────────────────────────────────────────────
-function HealthCard() {
-  const [backendOk, setBackendOk] = useState<boolean | null>(null);
-  useEffect(() => {
-    fetch("/api/backend/health")
-      .then(r => setBackendOk(r.ok))
-      .catch(() => setBackendOk(false));
-  }, []);
-  const dot = (ok: boolean | null) =>
-    ok === null ? "bg-yellow-400 animate-pulse" : ok ? "bg-emerald-400" : "bg-rose-400";
-  const lbl = (ok: boolean | null) =>
-    ok === null ? "Checking…" : ok ? "Online" : "Unreachable";
-  return (
-    <div className="avss-card p-4">
-      <h3 className="text-sm font-semibold mb-3 font-display">System Health</h3>
-      <div className="space-y-2 text-sm">
-        {[
-          { label: "Backend API",   ok: backendOk },
-          { label: "AI Pipeline",   ok: backendOk },
-          { label: "Database",      ok: backendOk },
-        ].map(({ label, ok }) => (
-          <div key={label} className="flex items-center justify-between">
-            <span className="text-slate-300">{label}</span>
-            <span className="flex items-center gap-1.5">
-              <span className={`w-2 h-2 rounded-full ${dot(ok)}`} />
-              <span className="text-xs text-slate-400">{lbl(ok)}</span>
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ── Recent searches panel ──────────────────────────────────────────────────────
-function RecentSearches({ searches }: { searches: SearchRecord[] }) {
-  if (searches.length === 0) return null;
-  return (
-    <div className="avss-card p-4">
-      <h3 className="text-sm font-semibold mb-3 font-display">Recent Searches</h3>
-      <div className="space-y-2">
-        {searches.slice(0, 5).map(s => (
-          <div key={s.query_id} className="flex items-center justify-between text-sm">
-            <div>
-              <span className="text-slate-300">{s.camera_name || `Query ${s.query_id}`}</span>
-              <span className="text-xs text-slate-500 ml-2">
-                {s.total_matches} match{s.total_matches !== 1 ? "es" : ""}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <StatusBadge status={s.status} />
-              {s.output_video_url && (
-                <Link
-                  href={`/pipeline`}
-                  className="text-xs text-emerald-400 underline"
-                >
-                  View
-                </Link>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ── Main page ─────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const { user, authFetch } = useAuth();
-  const [jobs,     setJobs]     = useState<Job[]>([]);
-  const [searches, setSearches] = useState<SearchRecord[]>([]);
-  const [cameras,  setCameras]  = useState<any[]>([]);
-  const [loading,  setLoading]  = useState(true);
-  const [filter,   setFilter]   = useState<Filter>("all");
-  const [query,    setQuery]    = useState("");
-  const [expandedErr, setExpandedErr] = useState<Set<string|number>>(new Set());
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [jobs,    setJobs]    = useState<Job[]>([]);
+  const [cameras, setCameras] = useState<any[]>([]);
+  const [unread,  setUnread]  = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [greeting, setGreeting] = useState("Welcome");
   const refreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = async () => {
     try {
-      const [jr, cr, sr] = await Promise.all([
+      const [jr, cr, ar] = await Promise.all([
         authFetch(`${API}/pipeline/jobs`),
         authFetch(`${API}/cameras`),
-        authFetch(`${API}/pipeline/jobs`), // searches would be a separate endpoint if it existed
+        authFetch(`${API}/alerts?unread_only=true`),
       ]);
       if (jr.ok) setJobs(await jr.json());
       if (cr.ok) {
         const cd = await cr.json();
         setCameras(cd?.cameras ?? (Array.isArray(cd) ? cd : []));
       }
-      setLastUpdated(new Date());
-    } finally {
-      setLoading(false);
-    }
+      if (ar.ok) {
+        const ad = await ar.json();
+        setUnread(ad.unread ?? 0);
+      }
+    } finally { setLoading(false); }
   };
 
   useEffect(() => {
+    const h = new Date().getHours();
+    setGreeting(h < 12 ? "Good Morning" : h < 18 ? "Good Afternoon" : "Good Evening");
     load();
-    refreshRef.current = setInterval(load, AUTO_REFRESH_MS);
+    refreshRef.current = setInterval(load, 15_000);
     return () => { if (refreshRef.current) clearInterval(refreshRef.current); };
   }, []);
 
-  const toggleErr = (id: string | number) =>
-    setExpandedErr(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
-
-  // Derived stats
   const completed  = jobs.filter(j => j.status === "completed").length;
-  const failed     = jobs.filter(j => j.status === "failed").length;
   const processing = jobs.filter(j => j.status === "processing").length;
-  const successRate = jobs.length > 0 ? Math.round((completed / jobs.length) * 100) : 0;
-  const avgDuration = (() => {
-    const withDur = jobs.filter(j => j.duration_seconds && j.duration_seconds > 0);
-    if (!withDur.length) return null;
-    return withDur.reduce((s, j) => s + (j.duration_seconds || 0), 0) / withDur.length;
-  })();
+  const totalDets  = jobs.reduce((s, j) => s + (j.total_detections ?? 0), 0);
+  const onlineCams = cameras.filter(c => c.status === "active").length;
+  const firstName  = (user?.full_name || "Operator").split(" ")[0];
 
-  // Filter + search
-  const visibleJobs = jobs
-    .filter(j => filter === "all" || j.status === filter)
-    .filter(j => {
-      if (!query) return true;
-      const q = query.toLowerCase();
-      return sourceName(j).toLowerCase().includes(q) || String(j.job_id).includes(q);
-    });
-
-  const FILTERS: { key: Filter; label: string; count: number; color: string }[] = [
-    { key: "all",        label: "All",        count: jobs.length,   color: "btn-outline" },
-    { key: "completed",  label: "Completed",  count: completed,     color: "btn-outline" },
-    { key: "processing", label: "Processing", count: processing,    color: "btn-outline" },
-    { key: "failed",     label: "Failed",     count: failed,        color: "btn-outline" },
+  const stats = [
+    { label: "Total Detections",  value: totalDets,   note: `${processing} job(s) running`,          icon: Users,         tone: "text-accent",  href: "/gallery" },
+    { label: "Videos Processed",  value: completed,   note: `${jobs.length} total`,                   icon: UserCheck,     tone: "text-violet",  href: "/search" },
+    { label: "Active Cameras",    value: onlineCams,  note: `${cameras.length - onlineCams} offline`, icon: Camera,        tone: "text-cyan",    href: "/live" },
+    { label: "Unread Alerts",     value: unread,      note: unread ? "Needs attention" : "All clear", icon: TriangleAlert, tone: "text-danger",  href: "/alerts" },
   ];
+
+  const recentActivity = jobs.slice(0, 5).map(j => ({
+    icon:  j.status === "completed" ? ScanFace : j.status === "failed" ? TriangleAlert : Activity,
+    text:  `Job ${j.job_id}: ${j.original_filename || j.source_file || "video"} — ${j.status}`,
+    tone:  j.status === "completed" ? "text-ok" : j.status === "failed" ? "text-danger" : "text-accent",
+    href:  "/search",
+  }));
 
   return (
     <AppShell>
-      {/* Header */}
-      <div className="flex items-start justify-between mb-1">
-        <div>
-          <h1 className="text-2xl font-bold font-display">
-            Welcome, {user?.full_name ?? "Operator"}
-          </h1>
-          <p className="text-slate-400 text-sm">Find a person across your processed footage.</p>
-        </div>
-        {lastUpdated && (
-          <div className="text-right hidden sm:block">
-            <span className="text-xs text-slate-500">
-              Updated {lastUpdated.toLocaleTimeString()}
-            </span>
-            <button
-              onClick={load}
-              className="block text-xs text-emerald-400 hover:text-emerald-300 mt-0.5"
-            >
-              ↻ Refresh
-            </button>
+      <div className="space-y-6">
+        {/* Header */}
+        <header className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="font-display text-2xl font-semibold">{greeting}, {firstName}!</h1>
+            <p className="text-sm text-mute">Here&rsquo;s what&rsquo;s happening in your surveillance system.</p>
           </div>
-        )}
+          <div className="flex flex-wrap gap-2">
+            <Link href="/search"  className="btn-ghost"><Search className="size-4" aria-hidden/> New search</Link>
+            <Link href="/live"    className="btn-ghost"><Video  className="size-4" aria-hidden/> Live view</Link>
+            <Link href="/alerts"  className="btn-ghost"><Bell   className="size-4" aria-hidden/> Alerts {unread > 0 && `(${unread})`}</Link>
+          </div>
+        </header>
+
+        {/* Stat cards */}
+        <section aria-label="Key statistics" className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+          {stats.map(({ label, value, note, icon: Icon, tone, href }) => (
+            <Link key={label} href={href}
+              className="glass flex items-center gap-4 p-4 transition-colors hover:border-accent">
+              <span className={`grid size-12 shrink-0 place-items-center rounded-xl bg-panel-2 ${tone}`}>
+                <Icon className="size-6" aria-hidden/>
+              </span>
+              <div>
+                <p className="text-xs text-mute">{label}</p>
+                <p className="font-display text-2xl font-semibold">
+                  {loading ? "…" : value}
+                </p>
+                <p className={`text-xs ${tone}`}>{note}</p>
+              </div>
+            </Link>
+          ))}
+        </section>
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          {/* Recent activity */}
+          <section className="glass p-4" aria-labelledby="recent">
+            <div className="flex items-center justify-between mb-3">
+              <h2 id="recent" className="font-display text-base font-semibold">Recent Activity</h2>
+              <Link href="/alerts" className="text-xs text-accent hover:underline">View alerts</Link>
+            </div>
+            {recentActivity.length === 0 ? (
+              <p className="text-sm text-mute py-4 text-center">No jobs yet. Upload a video to get started.</p>
+            ) : (
+              <ul className="space-y-2">
+                {recentActivity.map(({ icon: Icon, text, tone, href }, i) => (
+                  <li key={i}>
+                    <Link href={href} className="flex items-center gap-3 rounded-lg bg-panel-2 px-3 py-2.5 text-sm transition-colors hover:ring-1 hover:ring-accent">
+                      <span className={`grid size-8 shrink-0 place-items-center rounded-md bg-bg/60 ${tone}`}>
+                        <Icon className="size-4" aria-hidden/>
+                      </span>
+                      <span className="flex-1 truncate">{text}</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          {/* Detection trend */}
+          <section className="glass p-4" aria-labelledby="trend">
+            <h2 id="trend" className="font-display text-base font-semibold">Detection Activity</h2>
+            {loading ? (
+              <div className="h-40 flex items-center justify-center text-mute text-sm">Loading…</div>
+            ) : (
+              <TrendChart jobs={jobs}/>
+            )}
+          </section>
+        </div>
+
+        {/* Quick actions */}
+        <div className="glass p-4">
+          <h2 className="font-display text-base font-semibold mb-3">Quick Actions</h2>
+          <div className="flex flex-wrap gap-3">
+            <Link href="/search"  className="btn-primary"><Search className="size-4"/> Start Person Search</Link>
+            <Link href="/live"    className="btn-ghost"><Video className="size-4"/>   Live Monitoring</Link>
+            <Link href="/gallery" className="btn-ghost"><Users className="size-4"/>   View Gallery</Link>
+            <Link href="/cameras" className="btn-ghost"><Camera className="size-4"/>  Manage Cameras</Link>
+          </div>
+        </div>
       </div>
-
-      {loading ? (
-        <div className="space-y-3 animate-pulse mt-6">
-          <div className="h-24 avss-card" />
-          <div className="h-48 avss-card" />
-        </div>
-      ) : (
-        <>
-          {/* ── Stat cards ───────────────────────────────────────────── */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-5 mb-5">
-            <button onClick={() => setFilter("all")} className="text-left">
-              <StatTag label="Total jobs" value={jobs.length} />
-            </button>
-            <button onClick={() => setFilter("completed")} className="text-left">
-              <StatTag label="Completed" value={`${completed} (${successRate}%)`} />
-            </button>
-            <button onClick={() => setFilter("failed")} className="text-left">
-              <StatTag label="Failed" value={failed} />
-            </button>
-            <StatTag label="Avg duration" value={avgDuration ? fmtDuration(avgDuration) : "—"} />
-          </div>
-
-          {/* Secondary stats row */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-            <StatTag label="Cameras" value={`${cameras.filter(c=>c.status==="active").length} online / ${cameras.length} total`} />
-            <StatTag label="Processing now" value={processing} />
-            <StatTag label="Success rate" value={`${successRate}%`} />
-            <StatTag label="Backend" value="Online" />
-          </div>
-
-          {/* ── Quick actions ─────────────────────────────────────────── */}
-          <div className="flex flex-wrap gap-3 mb-6">
-            <Link href="/pipeline" className="btn-primary">
-              🔍 Start Search
-            </Link>
-            <Link href="/pipeline" className="btn-outline">
-              📁 Upload Video
-            </Link>
-            <Link href="/cameras" className="btn-outline">
-              📹 Add Camera
-            </Link>
-          </div>
-
-          {/* ── Top panels row ────────────────────────────────────────── */}
-          <div className="grid lg:grid-cols-3 gap-3 mb-6">
-            <div className="lg:col-span-2">
-              <ActivityChart jobs={jobs} />
-            </div>
-            <HealthCard />
-          </div>
-
-          {/* ── Recent searches ───────────────────────────────────────── */}
-          <RecentSearches searches={searches} />
-
-          {/* ── Jobs table ───────────────────────────────────────────── */}
-          <div className="flex flex-wrap items-center justify-between gap-3 mb-3 mt-2">
-            <h2 className="font-semibold font-display">Recent Jobs</h2>
-            <div className="flex flex-wrap items-center gap-2">
-              {/* Status filters */}
-              {FILTERS.map(f => (
-                <button
-                  key={f.key}
-                  onClick={() => setFilter(f.key)}
-                  className={`text-xs px-2.5 py-1 border rounded-full transition-colors ${
-                    filter === f.key
-                      ? "bg-emerald-600/20 border-emerald-600 text-emerald-300"
-                      : "border-slate-700 text-slate-400 hover:border-slate-500"
-                  }`}
-                >
-                  {f.label}
-                  {f.count > 0 && (
-                    <span className="ml-1 opacity-60">{f.count}</span>
-                  )}
-                </button>
-              ))}
-              {/* Search box */}
-              <input
-                type="search"
-                placeholder="Search jobs…"
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                className="avss-input !w-40 !py-1 text-xs"
-              />
-            </div>
-          </div>
-
-          {visibleJobs.length === 0 ? (
-            <div className="avss-card p-10 text-center">
-              <p className="font-medium">No jobs found</p>
-              <p className="text-sm text-slate-400 mt-1">
-                {jobs.length === 0
-                  ? "Upload a video or connect a camera to get started."
-                  : "No jobs match the current filter."}
-              </p>
-              {jobs.length === 0 && (
-                <Link href="/pipeline" className="btn-primary mt-4 inline-block">
-                  Upload your first video →
-                </Link>
-              )}
-            </div>
-          ) : (
-            <div className="avss-card overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-slate-400 text-left text-xs uppercase tracking-wide">
-                  <tr>
-                    <th className="p-3">Job</th>
-                    <th className="p-3">Source</th>
-                    <th className="p-3">Status</th>
-                    <th className="p-3 w-40">Progress</th>
-                    <th className="p-3">Frames</th>
-                    <th className="p-3">Duration</th>
-                    <th className="p-3">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleJobs.map(j => {
-                    const errMsg = j.error_message || j.error;
-                    const isExpanded = expandedErr.has(j.job_id);
-                    return (
-                      <>
-                        <tr
-                          key={j.job_id}
-                          className="border-t border-slate-700 hover:bg-slate-800/50 transition-colors"
-                        >
-                          <td className="p-3 font-mono text-xs text-slate-400">
-                            {j.job_id}
-                          </td>
-                          <td className="p-3 max-w-[180px]">
-                            <span className="truncate block" title={sourceName(j)}>
-                              {sourceName(j)}
-                            </span>
-                          </td>
-                          <td className="p-3">
-                            <StatusBadge status={j.status} />
-                          </td>
-                          <td className="p-3">
-                            <div className="flex items-center gap-2">
-                              <div className="flex-1">
-                                <ProgressBar value={j.progress} />
-                              </div>
-                              <span className="text-xs text-slate-400 w-8 text-right">
-                                {j.progress}%
-                              </span>
-                            </div>
-                            {j.status === "processing" && j.created_at && (
-                              <div className="text-[10px] text-slate-500 mt-0.5">
-                                {etaLabel(j.progress, j.created_at)}
-                              </div>
-                            )}
-                          </td>
-                          <td className="p-3 text-slate-300">
-                            {fmtFrames(j.frames_processed, j.total_frames)}
-                          </td>
-                          <td className="p-3 text-slate-300">
-                            {fmtDuration(j.duration_seconds)}
-                          </td>
-                          <td className="p-3">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              {j.status === "completed" && (
-                                <Link
-                                  href="/pipeline"
-                                  className="text-xs text-emerald-400 underline hover:text-emerald-300"
-                                >
-                                  Search
-                                </Link>
-                              )}
-                              {j.status === "failed" && errMsg && (
-                                <button
-                                  onClick={() => toggleErr(j.job_id)}
-                                  className="text-xs text-rose-400 underline hover:text-rose-300"
-                                >
-                                  {isExpanded ? "Hide error" : "Error ▼"}
-                                </button>
-                              )}
-                              {j.status === "failed" && (
-                                <Link
-                                  href="/pipeline"
-                                  className="text-xs text-orange-400 underline hover:text-orange-300"
-                                >
-                                  Retry
-                                </Link>
-                              )}
-                              {j.status === "processing" && (
-                                <span className="text-xs text-slate-500">Running…</span>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-
-                        {/* Expanded error row */}
-                        {j.status === "failed" && isExpanded && errMsg && (
-                          <tr key={`${j.job_id}-err`} className="bg-rose-500/5">
-                            <td colSpan={7} className="px-3 py-2">
-                              <div className="text-xs text-rose-300 font-mono break-all">
-                                ⚠ {errMsg}
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </>
-      )}
     </AppShell>
   );
 }

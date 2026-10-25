@@ -1,9 +1,10 @@
 "use client";
-
 import { useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { AuthHero } from "@/components/layout/AuthHero";
+import { useRouter } from "next/navigation";
+import { Eye, EyeOff, Lock, Mail } from "lucide-react";
+import { Logo } from "@/components/layout/Logo";
+import HeroArt from "@/components/art/HeroArt";
 import { useAuth } from "@/hooks/useAuth";
 
 const API = "/api/backend";
@@ -11,139 +12,103 @@ const API = "/api/backend";
 export default function LoginPage() {
   const router = useRouter();
   const { saveToken } = useAuth();
+  const [show,    setShow]    = useState(false);
+  const [error,   setError]   = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const [email, setEmail]       = useState("");
-  const [password, setPassword] = useState("");
-  const [showPw, setShowPw]     = useState(false);
-  const [error, setError]       = useState("");
-  const [loading, setLoading]   = useState(false);
+  const fieldCls = "flex items-center gap-2 rounded-lg border border-edge bg-panel-2 px-3 py-2.5 focus-within:border-accent transition-colors";
 
-  const quickFill = (e: string, p: string) => { setEmail(e); setPassword(p); };
-
-  const handleSubmit = async (ev: FormEvent) => {
-    ev.preventDefault();
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
     setError("");
-
-    if (!/^\S+@\S+\.\S+$/.test(email)) { setError("Enter a valid email address."); return; }
-    if (!password) { setError("Enter your password."); return; }
+    const fd    = new FormData(e.currentTarget);
+    const email = String(fd.get("email") ?? "").trim();
+    const pw    = String(fd.get("password") ?? "");
+    if (!email || !pw) { setError("Enter your email and password."); return; }
 
     setLoading(true);
     try {
-      const res = await fetch(`${API}/auth/login`, {
+      const res  = await fetch(`${API}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password: pw }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.detail || "Login failed.");
 
       saveToken({
-        access_token: data.access_token,
+        access_token:  data.access_token,
         refresh_token: data.refresh_token,
-        token_type: data.token_type,
-        user: data.user ?? null,
+        token_type:    data.token_type,
+        user:          data.user ?? null,
       });
 
-      const role = data.user?.role;
-      const isSuper = data.user?.is_superuser;
-      router.replace(role === "admin" || isSuper ? "/admin/dashboard" : "/dashboard");
-    } catch (e: any) {
-      setError(e.message || "Something went wrong.");
+      const isAdm = data.user?.role === "admin" || data.user?.is_superuser;
+      router.replace(isAdm ? "/admin/dashboard" : "/dashboard");
+    } catch (err: any) {
+      setError(err.message || "Something went wrong.");
     } finally {
       setLoading(false);
     }
-  };
+  }
 
   return (
-    <div className="min-h-screen lg:grid lg:grid-cols-2">
-      {/* ── Left: hero ─────────────────────────────────────────────────── */}
-      <div className="relative h-64 lg:h-auto overflow-hidden" style={{ background: "#efe6d0" }}>
-        <AuthHero />
-        <div className="relative p-8 text-black pointer-events-none">
-          <h1 className="text-5xl font-black font-display tracking-[-0.04em]">AVSS</h1>
-          <p className="mt-2 max-w-xs text-sm text-black/70">
-            One face, hours of footage, a few minutes to find them.
-          </p>
-        </div>
-      </div>
+    <div className="mx-auto max-w-7xl min-h-screen grid place-items-center p-4 sm:p-6">
+      <div className="glass w-full max-w-4xl grid overflow-hidden md:grid-cols-2">
 
-      {/* ── Right: form ────────────────────────────────────────────────── */}
-      <div className="grid place-items-center p-6">
-        <div className="w-full max-w-md">
-          <div className="avss-card p-6">
-            <h2 className="text-xl font-semibold font-display">Sign in</h2>
-            <p className="text-sm text-slate-400 mb-5">Authorized security personnel only.</p>
+        {/* ── Left: form ──────────────────────────────────────── */}
+        <section className="p-8 md:p-12">
+          <Logo subtitle/>
+          <h1 className="mt-10 font-display text-2xl font-semibold">Welcome Back!</h1>
+          <p className="text-sm text-mute">Sign in to continue to AVSS</p>
 
-            {error && (
-              <div className="rounded border border-rose-500/40 bg-rose-500/10 text-rose-200 px-4 py-3 text-sm mb-4" role="alert">
-                {error}
-              </div>
-            )}
+          <form onSubmit={submit} noValidate className="mt-6 space-y-3">
+            <label className={fieldCls}>
+              <Mail className="size-4 text-mute" aria-hidden/>
+              <input name="email" type="email" autoComplete="username"
+                placeholder="Email address" aria-label="Email"
+                className="w-full bg-transparent text-sm outline-none"/>
+            </label>
 
-            <form onSubmit={handleSubmit} className="space-y-4" noValidate>
-              <label className="block text-sm text-slate-300">
-                Email
-                <input
-                  type="email"
-                  autoComplete="username"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  className="avss-input mt-1"
-                  required
-                />
-              </label>
-
-              <label className="block text-sm text-slate-300">
-                Password
-                <div className="relative">
-                  <input
-                    type={showPw ? "text" : "password"}
-                    autoComplete="current-password"
-                    value={password}
-                    onChange={e => setPassword(e.target.value)}
-                    className="avss-input mt-1 pr-16"
-                    required
-                  />
-                  <button
-                    type="button"
-                    className="absolute right-2 top-3.5 text-xs text-slate-400 hover:text-slate-200"
-                    onClick={() => setShowPw(v => !v)}
-                  >
-                    {showPw ? "Hide" : "Show"}
-                  </button>
-                </div>
-              </label>
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="btn-primary w-full py-2.5"
-              >
-                {loading ? "Signing in…" : "Sign in"}
+            <label className={fieldCls}>
+              <Lock className="size-4 text-mute" aria-hidden/>
+              <input name="password" type={show ? "text" : "password"}
+                autoComplete="current-password" placeholder="Password" aria-label="Password"
+                className="w-full bg-transparent text-sm outline-none"/>
+              <button type="button" onClick={() => setShow(v => !v)}
+                aria-label={show ? "Hide password" : "Show password"} aria-pressed={show}
+                className="text-mute hover:text-white">
+                {show ? <EyeOff className="size-4" aria-hidden/> : <Eye className="size-4" aria-hidden/>}
               </button>
-            </form>
+            </label>
 
-            {/* Demo quick-fill */}
-            <div className="mt-4 text-xs text-slate-400 border-t border-slate-700 pt-3">
-              Demo accounts:{" "}
-              <button className="underline hover:text-slate-200" onClick={() => quickFill("user@avss.demo", "user123")}>User</button>
-              {" · "}
-              <button className="underline hover:text-slate-200" onClick={() => quickFill("admin@avss.demo", "admin123")}>Admin</button>
-            </div>
+            {error && <p role="alert" className="text-xs text-danger">{error}</p>}
 
-            <div className="mt-3 flex items-center justify-between text-sm">
-              <p className="text-slate-400">
-                No account?{" "}
-                <Link href="/register" className="text-emerald-400 underline hover:text-emerald-300">
-                  Register
-                </Link>
-              </p>
-              <Link href="/setup" className="text-orange-400 underline hover:text-orange-300 text-xs">
-                First-time setup →
-              </Link>
-            </div>
+            <button type="submit" disabled={loading} className="btn-primary w-full justify-center">
+              {loading ? "Signing in…" : "Login"}
+            </button>
+          </form>
+
+          <p className="mt-5 text-center text-xs text-mute">
+            Don&apos;t have an account?{" "}
+            <Link href="/register" className="text-accent hover:underline">Sign Up</Link>
+          </p>
+          <p className="mt-2 text-center text-xs text-mute">
+            First time?{" "}
+            <Link href="/setup" className="text-warn hover:underline">Create Admin →</Link>
+          </p>
+        </section>
+
+        {/* ── Right: hero art ──────────────────────────────────── */}
+        <section className="relative min-h-72 overflow-hidden hidden md:block">
+          <div className="absolute inset-0"><HeroArt/></div>
+          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-bg/95 via-bg/70 to-transparent p-8 pt-24">
+            <p className="font-display text-3xl font-semibold leading-tight">
+              Smarter Surveillance,<br/>Safer Tomorrow
+            </p>
+            <p className="mt-2 text-sm text-mute">Find. Identify. Protect.</p>
           </div>
-        </div>
+        </section>
       </div>
     </div>
   );

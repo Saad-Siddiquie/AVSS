@@ -13,7 +13,7 @@ Pipeline role:
        ↓
   OSNet generates 512-dim body embedding   ← this module
        ↓
-  Combined with ArcFace face embedding for dual-modality search
+  Stored as optional re-ID data; face-photo searches use ArcFace only
 
 Weight file: weights/osnet_final.pt
 """

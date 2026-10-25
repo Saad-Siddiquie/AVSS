@@ -1,0 +1,101 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #050b1a;
+  --color-panel: #0a1630;
+  --color-panel-2: #0e1d3d;
+  --color-edge: #1b3a78;
+  --color-accent: #3b82f6;
+  --color-violet: #7c5cff;
+  --color-cyan: #22d3ee;
+  --color-ok: #34d399;
+  --color-warn: #f59e0b;
+  --color-danger: #f43f5e;
+  --color-mute: #8da2c8;
+  --font-display: var(--font-sora), ui-sans-serif, system-ui;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui;
+}
+
+body {
+  background:
+    radial-gradient(1200px 600px at 80% -10%, #12306e55, transparent 60%),
+    radial-gradient(900px 500px at 0% 100%, #2a1a6e44, transparent 60%),
+    var(--color-bg);
+  color: #e6edff;
+  font-family: var(--font-sans);
+}
+
+@layer components {
+.glass {
+  background: color-mix(in srgb, var(--color-panel) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-edge) 70%, transparent);
+  border-radius: 14px;
+  box-shadow: 0 0 24px #1d4ed822;
+}
+
+.btn-primary {
+  color: #fff;
+  cursor: pointer;
+  background: linear-gradient(90deg, var(--color-accent), var(--color-violet));
+  border-radius: 10px;
+  padding: 0.6rem 1rem;
+  font-weight: 600;
+  text-align: center;
+  display: block;
+}
+
+
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--color-edge) 80%, transparent);
+  background: var(--color-panel-2);
+  border-radius: 10px;
+  padding: 0.5rem 0.9rem;
+  font-size: 0.875rem;
+  transition: border-color 0.15s;
+}
+.btn-ghost:hover { border-color: var(--color-accent); }
+.btn-primary:disabled, .btn-ghost:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary:disabled { filter: saturate(0.5); }
+
+.chip {
+  border: 1px solid color-mix(in srgb, var(--color-edge) 80%, transparent);
+  border-radius: 999px;
+  padding: 0.3rem 0.8rem;
+  font-size: 0.8rem;
+  color: var(--color-mute);
+  transition: border-color 0.15s, color 0.15s;
+}
+.chip:hover { color: #fff; }
+.chip[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+  border-color: var(--color-accent);
+  color: #fff;
+}
+
+.field {
+  width: 100%;
+  background: var(--color-panel-2);
+  border: 1px solid var(--color-edge);
+  border-radius: 10px;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.875rem;
+}
+
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+
+:focus-visible { outline: 2px solid var(--color-cyan); outline-offset: 2px; }
+
+/* Settings > General > Theme: "Midnight" is a deeper, higher-contrast variant of the default dark theme. */
+html[data-theme="midnight"] {
+  --color-bg: #02050d;
+  --color-panel: #060d1f;
+  --color-panel-2: #0a1530;
+  --color-edge: #17316a;
+}

@@ -41,3 +41,7 @@ supervision==0.21.0
 # ── Video encoding (H.264 for browser playback) ───────────────────────────────
 # imageio-ffmpeg ships a static ffmpeg binary — no system ffmpeg needed
 imageio-ffmpeg>=0.5.1
+
+# ── Supabase (Storage + PostgreSQL) ──────────────────────────────────────────
+# pip install supabase — Python client for Supabase REST API + Storage
+supabase>=2.3.0
