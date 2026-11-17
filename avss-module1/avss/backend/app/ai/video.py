@@ -40,7 +40,12 @@ class VideoSource:
         """
         # cv2.VideoCapture accepts int for webcam index
         _src = int(source) if source.isdigit() else source
-        self._cap = cv2.VideoCapture(_src)
+        # Use V4L2 backend for Linux device paths (e.g. /dev/video9 from scrcpy)
+        if isinstance(_src, str) and _src.startswith("/dev/video"):
+            self._cap = cv2.VideoCapture(_src, cv2.CAP_V4L2)
+            self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # low latency for live streams
+        else:
+            self._cap = cv2.VideoCapture(_src)
         if not self._cap.isOpened():
             raise ValueError(f"Cannot open video source: {source!r}")
 

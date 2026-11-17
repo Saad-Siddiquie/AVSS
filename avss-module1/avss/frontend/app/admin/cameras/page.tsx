@@ -122,33 +122,95 @@ export default function AdminCamerasPage() {
       {/* Add / Edit modal */}
       {editing!==null&&(
         <div className="fixed inset-0 z-40 bg-black/60 flex items-center justify-center p-4" role="dialog" aria-modal="true" onClick={e=>e.target===e.currentTarget&&setEditing(null)}>
-          <div className="glass w-full max-w-md p-5 shadow-2xl">
-            <h2 className="font-display text-lg font-semibold mb-4">{editing.id?"Edit Camera":"Add Camera"}</h2>
+          <div className="glass w-full max-w-md p-5 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <h2 className="font-display text-lg font-semibold mb-1">{editing.id?"Edit Camera":"Add Camera"}</h2>
+            <p className="text-xs text-mute mb-4">Supports RTSP, IP Webcam (Android app), HTTP MJPEG, webcams and video files.</p>
+
             {formErr&&<div className="rounded-lg bg-danger/10 border border-danger/30 text-danger px-3 py-2 text-sm mb-3">{formErr}</div>}
+
+            {/* Quick-fill for IP Webcam */}
+            {!editing.id && (
+              <div className="rounded-xl bg-accent/10 border border-accent/30 px-4 py-3 mb-4 text-xs">
+                <p className="font-semibold text-accent mb-2">📱 IP Webcam Android App</p>
+                <p className="text-mute mb-2">Open IP Webcam app on your phone → Start server → paste the URL shown:</p>
+                <div className="flex gap-2">
+                  <input
+                    className="field flex-1 text-xs"
+                    placeholder="http://192.168.x.x:8080"
+                    onBlur={e => {
+                      const v = e.target.value.trim();
+                      if (v) setEditing(prev => ({ ...prev!, url: v, camera_type: "ip_webcam" }));
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === "Enter") {
+                        const v = (e.target as HTMLInputElement).value.trim();
+                        if (v) { setEditing(prev => ({ ...prev!, url: v, camera_type: "ip_webcam" })); (e.target as HTMLInputElement).value = ""; }
+                      }
+                    }}
+                  />
+                  <span className="text-mute self-center">← paste here</span>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-3">
               <label className="block text-sm text-mute">
                 Name *
-                <input value={editing.name??""} onChange={e=>setEditing(v=>({...v!,name:e.target.value}))} placeholder="e.g. Front Entrance" className="field mt-1"/>
+                <input value={editing.name??""} onChange={e=>setEditing(v=>({...v!,name:e.target.value}))} placeholder="e.g. My Phone Camera" className="field mt-1" autoFocus={!editing.id}/>
               </label>
+
               <label className="block text-sm text-mute">
-                Type
+                Stream Type
                 <select value={editing.camera_type??"rtsp"} onChange={e=>setEditing(v=>({...v!,camera_type:e.target.value}))} className="field mt-1">
-                  <option value="rtsp">RTSP Stream</option>
+                  <option value="rtsp">RTSP Stream (IP Camera / CCTV)</option>
+                  <option value="ip_webcam">📱 IP Webcam Android App</option>
                   <option value="webcam">Webcam / USB Camera</option>
-                  <option value="file">Video File</option>
+                  <option value="file">Video File (MP4, AVI, MKV)</option>
+                  <option value="http">HTTP MJPEG Stream</option>
                 </select>
               </label>
-              <label className="block text-sm text-mute">
-                URL / Path *
-                <input value={editing.url??""} onChange={e=>setEditing(v=>({...v!,url:e.target.value}))} placeholder="rtsp://… or /path/to/file.mp4" className="field mt-1"/>
-              </label>
+
+              <div>
+                <label className="block text-sm text-mute">
+                  URL / Path *
+                  <input
+                    value={editing.url??""}
+                    onChange={e => {
+                      const url = e.target.value;
+                      // Auto-detect type from URL
+                      let type = editing.camera_type ?? "rtsp";
+                      if (url.startsWith("rtsp://"))       type = "rtsp";
+                      else if (url.match(/^https?:\/\/.*:\d+/) || url.includes("/video") || url.includes("shot.jpg")) type = "ip_webcam";
+                      else if (url.startsWith("http://") || url.startsWith("https://")) type = "ip_webcam";
+                      else if (url === "0" || url.startsWith("/dev/") || /^\d+$/.test(url)) type = "webcam";
+                      else if (/\.(mp4|avi|mkv|mov)$/i.test(url)) type = "file";
+                      setEditing(v => ({ ...v!, url, camera_type: type }));
+                    }}
+                    placeholder={
+                      editing.camera_type === "ip_webcam" ? "http://192.168.x.x:8080" :
+                      editing.camera_type === "webcam"    ? "0  or  /dev/video0" :
+                      editing.camera_type === "file"      ? "/path/to/recording.mp4" :
+                      "rtsp://user:pass@192.168.x.x:554/stream1"
+                    }
+                    className="field mt-1"
+                  />
+                </label>
+                <p className="text-[10px] text-mute mt-1">
+                  {editing.camera_type === "ip_webcam"
+                    ? "IP Webcam app: copy the URL shown on your phone screen (e.g. http://192.168.100.37:8080)"
+                    : editing.camera_type === "rtsp"
+                    ? "Include credentials if required. For IP Webcam RTSP: rtsp://ip:8080/h264_ulaw.sdp"
+                    : ""}
+                </p>
+              </div>
+
               <label className="block text-sm text-mute">
                 Location / Zone
-                <input value={editing.location??""} onChange={e=>setEditing(v=>({...v!,location:e.target.value}))} placeholder="e.g. Gate A, Lobby" className="field mt-1"/>
+                <input value={editing.location??""} onChange={e=>setEditing(v=>({...v!,location:e.target.value}))} placeholder="e.g. Gate A, Lobby, Room 3" className="field mt-1"/>
               </label>
               <label className="block text-sm text-mute">
                 Description
-                <input value={editing.description??""} onChange={e=>setEditing(v=>({...v!,description:e.target.value}))} className="field mt-1"/>
+                <input value={editing.description??""} onChange={e=>setEditing(v=>({...v!,description:e.target.value}))} placeholder="Optional notes" className="field mt-1"/>
               </label>
             </div>
             <div className="flex justify-end gap-2 mt-5">

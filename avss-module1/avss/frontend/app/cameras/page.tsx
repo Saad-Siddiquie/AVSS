@@ -27,10 +27,24 @@ const EMPTY: Partial<Camera> = {
   name: "", url: "", location: "", description: "",
 };
 
+// ── Helpers: auto-detect IP Webcam URLs ───────────────────────────────────────
+function detectCameraType(url: string): Camera["camera_type"] {
+  const u = url.trim().toLowerCase();
+  if (!u) return "rtsp";
+  if (u.startsWith("rtsp://")) return "rtsp";
+  if (u.match(/^https?:\/\/.*:\d+/) || u.includes("/video") || u.includes("shot.jpg")) return "ip_webcam";
+  if (u.startsWith("http://") || u.startsWith("https://")) return "ip_webcam";
+  if (u === "0" || u.startsWith("/dev/") || u.match(/^\d+$/)) return "webcam";
+  if (u.endsWith(".mp4") || u.endsWith(".avi") || u.endsWith(".mkv") || u.endsWith(".mov")) return "file";
+  return "rtsp";
+}
+
 const TYPE_HINTS: Record<string, string> = {
-  rtsp:   "rtsp://user:pass@192.168.1.100:554/stream1",
-  webcam: "0  or  /dev/video0",
-  file:   "/path/to/recording.mp4",
+  rtsp:      "rtsp://user:pass@192.168.1.100:554/stream1",
+  webcam:    "0  or  /dev/video0",
+  file:      "/path/to/recording.mp4",
+  ip_webcam: "http://192.168.x.x:8080  (IP Webcam Android app)",
+  http:      "http://192.168.x.x:8080/video  (HTTP MJPEG)",
 };
 
 // ── Live stream viewer modal ────────────────────────────────────────────────
@@ -48,7 +62,7 @@ function LiveViewer({
   const [errored,   setErrored]   = useState(false);
   const [loading,   setLoading]   = useState(true);
 
-  const mjpegUrl = `${BACKEND}/api/v1/cameras/${cam.id}/stream`;
+  const mjpegUrl = `${BACKEND}/api/v1/cameras/${cam.id}/stream/live`;
 
   const reload = () => { setErrored(false); setLoading(true); setStreamKey(k => k + 1); };
 
@@ -269,8 +283,10 @@ function CameraModal({
               className="field mt-1"
             >
               <option value="rtsp">RTSP Stream (IP Camera / CCTV)</option>
+              <option value="ip_webcam">IP Webcam Android App</option>
               <option value="webcam">Webcam / USB Camera</option>
               <option value="file">Video File (MP4, AVI, MKV)</option>
+              <option value="http">HTTP MJPEG Stream</option>
             </select>
           </label>
 
@@ -280,7 +296,12 @@ function CameraModal({
               URL / Path *
               <input
                 value={form.url ?? ""}
-                onChange={e => set("url", e.target.value)}
+                onChange={e => {
+                  const url = e.target.value;
+                  const detectedType = detectCameraType(url);
+                  setForm(p => ({ ...p!, url, camera_type: detectedType as Camera["camera_type"] }));
+                  setTestMsg(null);
+                }}
                 placeholder={TYPE_HINTS[form.camera_type ?? "rtsp"]}
                 className="field mt-1"
               />

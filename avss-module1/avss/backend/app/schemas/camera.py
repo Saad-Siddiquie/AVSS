@@ -2,7 +2,7 @@ from typing import Optional
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, field_validator
 
-VALID_TYPES = {"rtsp", "webcam", "file"}
+VALID_TYPES    = {"rtsp", "webcam", "file", "ip_webcam", "http"}
 VALID_STATUSES = {"active", "inactive", "error"}
 
 

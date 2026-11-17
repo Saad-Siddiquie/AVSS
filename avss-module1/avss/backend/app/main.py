@@ -33,6 +33,7 @@ from app.api import stats as stats_api
 from app.api import gallery as gallery_api
 from app.api import alerts as alerts_api
 from app.api import settings as settings_api
+from app.api import live_cam as live_cam_api
 
 logging.basicConfig(
     level=logging.INFO,
@@ -107,6 +108,7 @@ app.include_router(stats_api.router,     prefix=settings.API_PREFIX)
 app.include_router(gallery_api.router,   prefix=settings.API_PREFIX)
 app.include_router(alerts_api.router,    prefix=settings.API_PREFIX)
 app.include_router(settings_api.router,  prefix=settings.API_PREFIX)
+app.include_router(live_cam_api.router,  prefix=settings.API_PREFIX)
 
 
 @app.get("/", tags=["Root"])

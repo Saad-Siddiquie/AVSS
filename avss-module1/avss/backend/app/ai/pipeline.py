@@ -33,7 +33,12 @@ from app.ai.face import FaceDetector
 from app.ai.person import PersonDetector
 from app.ai.recognition import FaceRecognizer
 from app.ai.tracking import create_byte_tracker, detections_to_supervision
-from app.ai.weights_config import FACE_IN_PERSON_CONF, PERSON_CONF
+from app.ai.weights_config import (
+    FACE_IN_PERSON_CONF, PERSON_CONF,
+    PIPELINE_TARGET_FPS, MIN_FACE_SIZE, EMBED_REFRESH_FRAMES,
+    SEARCH_RELATIVE_GAP, ARCFACE_SIMILARITY_THRESHOLD,
+    LIVE_PERSON_CONF, LIVE_MIN_PERSON_PX, LIVE_MIN_BRIGHTNESS,
+)
 from app.models.detection_log import DetectionLog
 from app.models.video_job import VideoJob
 from app.models.search_query import SearchQuery
@@ -47,14 +52,9 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 EMBED_DIR = Path("uploads/embeddings")
 EMBED_DIR.mkdir(parents=True, exist_ok=True)
 
-# ── Tuning constants ──────────────────────────────────────────────────────────
-PIPELINE_TARGET_FPS = 10    # analyse 10 frames/sec — denser tracking, smoother box interpolation
-MIN_PERSON_SIZE = 40        # Wildtrack: allow smaller distant pedestrians (px)
-MIN_FACE_SIZE = 28          # minimum face size inside person crop
+# ── Tuning constants (imported from weights_config) ───────────────────────────
+MIN_PERSON_SIZE    = 40    # Wildtrack: allow smaller distant pedestrians (px)
 PERSON_DETECT_CONF = PERSON_CONF
-EMBED_REFRESH_FRAMES = 120  # re-embed a track every N analysed frames (quality refresh)
-# Search: only accept tracks nearly as strong as the best match (reduces wrong-person hits)
-SEARCH_RELATIVE_GAP = 0.10  # track must be within 0.10 of top match — tighter filter
 
 # Search output video — pad each hit with surrounding CCTV footage (seconds)
 RENDER_PAD_SEC_BEFORE = 2.0
@@ -662,94 +662,115 @@ def _merge_frame_intervals(intervals: list[tuple[int, int]]) -> list[tuple[int, 
 
 
 def _build_render_intervals(
-    match_frame_indices: list[int],
+    match_timestamps_ms: list[float],
     native_fps: float,
-    total_frames: int,
-) -> list[tuple[int, int]]:
-    """Expand each match with before/after context so the clip is easy to watch."""
-    pad_before = max(1, int(RENDER_PAD_SEC_BEFORE * native_fps))
-    pad_after = max(1, int(RENDER_PAD_SEC_AFTER * native_fps))
-    cap_end = max(0, total_frames - 1) if total_frames > 0 else 10**9
+    duration_ms: float,
+) -> list[tuple[float, float]]:
+    """
+    Build [start_ms, end_ms] intervals around each match timestamp.
+    Uses milliseconds — avoids all frame-index / FPS conversion bugs.
+    """
+    pad_before_ms = RENDER_PAD_SEC_BEFORE * 1000.0
+    pad_after_ms  = RENDER_PAD_SEC_AFTER  * 1000.0
 
-    intervals = []
-    for f in match_frame_indices:
-        start = max(0, f - pad_before)
-        end = min(cap_end, f + pad_after)
+    intervals: list[tuple[float, float]] = []
+    for ts in match_timestamps_ms:
+        start = max(0.0, ts - pad_before_ms)
+        end   = min(duration_ms, ts + pad_after_ms)
         intervals.append((start, end))
-    return _merge_frame_intervals(intervals)
+
+    # Merge overlapping intervals
+    if not intervals:
+        return []
+    intervals.sort(key=lambda x: x[0])
+    merged: list[tuple[float, float]] = [intervals[0]]
+    for start, end in intervals[1:]:
+        prev_start, prev_end = merged[-1]
+        if start <= prev_end + 500:    # merge if less than 0.5s gap
+            merged[-1] = (prev_start, max(prev_end, end))
+        else:
+            merged.append((start, end))
+    return merged
 
 
 def _nearest_match_logs(
-    frame_idx: int,
-    sorted_match_frames: list[int],
-    frame_lookup: dict[int, list],
-    native_fps: float = 25.0,
+    current_ms: float,
+    sorted_match_ms: list[float],
+    ms_lookup: dict[float, list],
 ) -> list:
     """
-    Return interpolated bounding box position for context/padding frames.
-    Linearly interpolates between the two nearest sampled frames so the
-    box tracks the person smoothly instead of jumping/freezing.
+    For context frames (not exact match frames), return interpolated bboxes
+    by finding the two nearest sampled timestamps and linearly interpolating.
+
+    Uses milliseconds throughout — no frame-index/FPS mismatch.
     """
-    if frame_idx in frame_lookup:
-        return frame_lookup[frame_idx]
-    if not sorted_match_frames:
+    if not sorted_match_ms:
         return []
 
-    # Find surrounding sampled frames
-    prev_frame = None
-    next_frame = None
-    for f in sorted_match_frames:
-        if f <= frame_idx:
-            prev_frame = f
-        if f > frame_idx and next_frame is None:
-            next_frame = f
+    # Exact hit
+    if current_ms in ms_lookup:
+        return ms_lookup[current_ms]
 
-    if prev_frame is None:
-        return frame_lookup.get(next_frame, [])
-    if next_frame is None:
-        return frame_lookup.get(prev_frame, [])
+    # Find surrounding sampled timestamps
+    prev_ms: float | None = None
+    next_ms: float | None = None
+    for t in sorted_match_ms:
+        if t <= current_ms:
+            prev_ms = t
+        elif next_ms is None:
+            next_ms = t
 
-    # Linear interpolation between prev and next bbox
-    prev_logs = frame_lookup[prev_frame]
-    next_logs = frame_lookup[next_frame]
+    if prev_ms is None:
+        return ms_lookup.get(next_ms, [])          # before all detections
+    if next_ms is None:
+        return ms_lookup.get(prev_ms, [])           # after all detections
 
-    # Match by track_id
+    # Only interpolate if the gap is reasonable (< 3 seconds)
+    gap_ms = next_ms - prev_ms
+    if gap_ms > 3000:
+        # Too far apart — just use the nearest one
+        if (current_ms - prev_ms) <= (next_ms - current_ms):
+            return ms_lookup.get(prev_ms, [])
+        return ms_lookup.get(next_ms, [])
+
+    # Linear interpolation
+    alpha = (current_ms - prev_ms) / gap_ms        # 0.0 = prev, 1.0 = next
+
+    prev_logs = ms_lookup[prev_ms]
+    next_logs = ms_lookup[next_ms]
+
     prev_by_tid = {log.track_id: log for log in prev_logs}
     next_by_tid = {log.track_id: log for log in next_logs}
     common_tids = set(prev_by_tid) & set(next_by_tid)
 
     if not common_tids:
-        # No overlapping track — use nearest frame as-is
-        dist_prev = abs(frame_idx - prev_frame)
-        dist_next = abs(frame_idx - next_frame)
-        return frame_lookup[prev_frame if dist_prev <= dist_next else next_frame]
-
-    # Create interpolated log objects
-    total = next_frame - prev_frame
-    alpha = (frame_idx - prev_frame) / total  # 0.0 at prev, 1.0 at next
+        # Tracks differ — use nearest
+        if alpha <= 0.5:
+            return prev_logs
+        return next_logs
 
     class InterpLog:
-        """Lightweight bbox-only log for drawing during interpolation."""
+        """Lightweight bbox interpolation for context frames."""
+        __slots__ = ("track_id", "x1", "y1", "x2", "y2", "timestamp_ms", "_sim")
         def __init__(self, track_id, x1, y1, x2, y2, sim):
-            self.track_id = track_id
+            self.track_id   = track_id
             self.x1 = x1; self.y1 = y1; self.x2 = x2; self.y2 = y2
             self.timestamp_ms = None
             self._sim = sim
 
-    interp_logs = []
+    result = []
     for tid in common_tids:
         p = prev_by_tid[tid]
         n = next_by_tid[tid]
-        interp_logs.append(InterpLog(
-            track_id=tid,
-            x1=p.x1 + (n.x1 - p.x1) * alpha,
-            y1=p.y1 + (n.y1 - p.y1) * alpha,
-            x2=p.x2 + (n.x2 - p.x2) * alpha,
-            y2=p.y2 + (n.y2 - p.y2) * alpha,
-            sim=getattr(p, '_sim', 0.0),
+        result.append(InterpLog(
+            track_id = tid,
+            x1 = p.x1 + (n.x1 - p.x1) * alpha,
+            y1 = p.y1 + (n.y1 - p.y1) * alpha,
+            x2 = p.x2 + (n.x2 - p.x2) * alpha,
+            y2 = p.y2 + (n.y2 - p.y2) * alpha,
+            sim = getattr(p, "_sim", 0.0),
         ))
-
-    return interp_logs
+    return result
 
 
 def _render_matched_clip(
@@ -762,42 +783,61 @@ def _render_matched_clip(
     camera_location: str,
 ) -> None:
     """
-    Render merged segments around each match (lead-in + follow-through).
-    Green box shown on match frames; nearest box carried on padded context frames.
-    """
-    frame_lookup: dict[int, list] = {}
-    for log in match_rows:
-        frame_lookup.setdefault(log.frame_index, []).append(log)
+    Render merged segments around each match.
 
-    if not frame_lookup:
+    Key fix: uses TIMESTAMP-BASED seeking (CAP_PROP_POS_MSEC) not frame-index seeking.
+    This eliminates the bbox-early-arrival bug caused by FPS subsampling mismatch.
+
+    Algorithm:
+      1. Build ms_lookup: {timestamp_ms → [DetectionLog, ...]}
+      2. Build render intervals in milliseconds
+      3. Seek to each segment start with CAP_PROP_POS_MSEC
+      4. Read frames one by one, asking OpenCV for the current position in ms
+      5. For each frame: find the nearest detection by timestamp, interpolate bbox
+    """
+    # ── Build lookup keyed by timestamp_ms ─────────────────────────────────
+    ms_lookup: dict[float, list] = {}
+    for log in match_rows:
+        ms_lookup.setdefault(float(log.timestamp_ms), []).append(log)
+
+    if not ms_lookup:
         logger.warning("No matched frames to render.")
         return
 
-    match_frames = sorted(frame_lookup.keys())
+    sorted_match_ms = sorted(ms_lookup.keys())
 
+    # ── Open source video ───────────────────────────────────────────────────
     cap = cv2.VideoCapture(source_path)
     if not cap.isOpened():
         raise ValueError(f"Cannot open video for rendering: {source_path!r}")
 
-    native_fps = cap.get(cv2.CAP_PROP_FPS) or fps or 25.0
+    native_fps   = cap.get(cv2.CAP_PROP_FPS) or fps or 25.0
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    duration_ms  = (total_frames / native_fps * 1000) if total_frames > 0 else 1e9
 
     if W == 0 or H == 0:
         cap.release()
-        raise ValueError(f"Video has zero dimensions — cannot render: {source_path!r}")
+        raise ValueError(f"Video has zero dimensions: {source_path!r}")
 
-    intervals = _build_render_intervals(match_frames, native_fps, total_frames)
-    max_frames_out = int(MAX_OUTPUT_VIDEO_SEC * native_fps)
+    logger.info(
+        "Rendering clip: fps=%.1f, %dx%d, duration=%.1fs, %d match timestamps",
+        native_fps, W, H, duration_ms/1000, len(sorted_match_ms),
+    )
 
+    # ── Build time-based intervals ──────────────────────────────────────────
+    intervals = _build_render_intervals(sorted_match_ms, native_fps, duration_ms)
+    max_duration_ms = MAX_OUTPUT_VIDEO_SEC * 1000.0
+
+    # ── VideoWriter ─────────────────────────────────────────────────────────
     output_str = str(output_path)
     writer = None
     for fourcc_code in ["avc1", "mp4v", "XVID"]:
         fourcc = cv2.VideoWriter_fourcc(*fourcc_code)
         writer = cv2.VideoWriter(output_str, fourcc, native_fps, (W, H))
         if writer.isOpened():
-            logger.info("VideoWriter opened with codec: %s (fps=%.2f)", fourcc_code, native_fps)
+            logger.info("VideoWriter: %s @ %.1f fps", fourcc_code, native_fps)
             break
         writer.release()
         writer = None
@@ -806,90 +846,126 @@ def _render_matched_clip(
         cap.release()
         raise ValueError("Cannot open VideoWriter — no supported codec found.")
 
-    MATCH_COLOR = (0, 255, 0)
-    CONTEXT_COLOR = (0, 200, 0)
-    FONT = cv2.FONT_HERSHEY_SIMPLEX
-    FONT_SCALE = 0.55
-    MODEL_LABEL = "wildtrack_best.pt + yolov8n-face + ArcFace + ByteTrack"
+    MATCH_COLOR   = (0, 255, 0)     # green — exact match frame
+    CONTEXT_COLOR = (0, 180, 255)   # orange — interpolated / context frame
+    FONT          = cv2.FONT_HERSHEY_SIMPLEX
+    FONT_SCALE    = 0.55
 
-    rendered = 0
-    for seg_start, seg_end in intervals:
-        if rendered >= max_frames_out:
-            break
-        seg_end = min(seg_end, seg_start + (max_frames_out - rendered) - 1)
+    rendered_ms    = 0.0
+    frame_ms_step  = 1000.0 / native_fps   # expected ms between frames
 
-        cap.set(cv2.CAP_PROP_POS_FRAMES, seg_start)
-        for frame_idx in range(seg_start, seg_end + 1):
-            if rendered >= max_frames_out:
-                break
-            ret, frame = cap.read()
-            if not ret:
-                logger.warning("cap.read() failed at frame %d", frame_idx)
+    # Tolerance window: a frame is an "exact match" if a detection is within
+    # one frame-step of its timestamp (handles rounding in OpenCV position)
+    EXACT_TOLERANCE_MS = frame_ms_step * 1.5
+
+    try:
+        for seg_start_ms, seg_end_ms in intervals:
+            if rendered_ms >= max_duration_ms:
                 break
 
-            is_exact_match = frame_idx in frame_lookup
-            logs = frame_lookup[frame_idx] if is_exact_match else _nearest_match_logs(
-                frame_idx, match_frames, frame_lookup, native_fps,
-            )
-            annotated = frame.copy()
-            box_color = MATCH_COLOR if is_exact_match else CONTEXT_COLOR
-            thickness = 3 if is_exact_match else 2
+            seg_end_ms = min(seg_end_ms, seg_start_ms + (max_duration_ms - rendered_ms))
 
-            cv2.putText(
-                annotated,
-                f"Camera: {camera_name}  |  {camera_location}",
-                (10, 22), FONT, 0.5, (255, 255, 255), 2, cv2.LINE_AA,
-            )
+            # ── Seek to segment start by time ───────────────────────────────
+            cap.set(cv2.CAP_PROP_POS_MSEC, seg_start_ms)
 
-            ts_ms = (frame_idx / native_fps) * 1000  # use actual video position always
-            cv2.putText(
-                annotated, _ms_to_str(ts_ms),
-                (10, H - 10), FONT, 0.5, (255, 255, 255), 1, cv2.LINE_AA,
-            )
+            while True:
+                # Ask OpenCV where we actually are
+                current_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
 
-            for log in logs:
-                x1 = max(0, int(log.x1))
-                y1 = max(0, int(log.y1))
-                x2 = min(W, int(log.x2))
-                y2 = min(H, int(log.y2))
-                cv2.rectangle(annotated, (x1, y1), (x2, y2), box_color, thickness)
-                if is_exact_match:
-                    sim = match_sims.get(log.track_id, 0.0)
-                    label = f"FOUND  ID:{log.track_id}  {sim*100:.0f}%"
-                    lbl_y = max(y1 - 8, 14)
-                    (tw, th), _ = cv2.getTextSize(label, FONT, FONT_SCALE, 2)
-                    cv2.rectangle(
-                        annotated, (x1, lbl_y - th - 4), (x1 + tw + 6, lbl_y + 2),
-                        MATCH_COLOR, -1,
-                    )
-                    cv2.putText(
-                        annotated, label, (x1 + 3, lbl_y), FONT, FONT_SCALE,
-                        (0, 0, 0), 2, cv2.LINE_AA,
-                    )
+                if current_ms > seg_end_ms + frame_ms_step:
+                    break
+                if rendered_ms >= max_duration_ms:
+                    break
 
-            (mw, _), _ = cv2.getTextSize(MODEL_LABEL, FONT, 0.38, 1)
-            cv2.putText(
-                annotated, MODEL_LABEL,
-                (W - mw - 8, H - 8), FONT, 0.38, (180, 180, 180), 1, cv2.LINE_AA,
-            )
+                ret, frame = cap.read()
+                if not ret:
+                    break
 
-            writer.write(annotated)
-            rendered += 1
+                # Re-read position AFTER the read (more accurate)
+                current_ms = cap.get(cv2.CAP_PROP_POS_MSEC) - frame_ms_step
 
-    writer.release()
-    cap.release()
+                # ── Find whether this frame has a detection ─────────────────
+                # Check if any stored detection is within tolerance
+                nearest_ms = None
+                min_dist   = float("inf")
+                for ts in sorted_match_ms:
+                    d = abs(ts - current_ms)
+                    if d < min_dist:
+                        min_dist = d
+                        nearest_ms = ts
 
-    duration_sec = rendered / native_fps if native_fps > 0 else 0
+                is_exact = (min_dist <= EXACT_TOLERANCE_MS) and (nearest_ms in ms_lookup)
+
+                if is_exact:
+                    logs      = ms_lookup[nearest_ms]
+                    box_color = MATCH_COLOR
+                    thickness = 3
+                else:
+                    # Interpolate bbox from surrounding detections
+                    logs      = _nearest_match_logs(current_ms, sorted_match_ms, ms_lookup)
+                    box_color = CONTEXT_COLOR
+                    thickness = 2
+
+                annotated = frame.copy()
+
+                # ── Overlays ────────────────────────────────────────────────
+                # Top: camera info
+                cv2.putText(
+                    annotated,
+                    f"Camera: {camera_name}  |  {camera_location}",
+                    (10, 22), FONT, 0.48, (255, 255, 255), 2, cv2.LINE_AA,
+                )
+
+                # Bottom: timestamp
+                ts_display = _ms_to_str(current_ms)
+                cv2.putText(
+                    annotated, ts_display,
+                    (10, H - 10), FONT, 0.48, (255, 255, 255), 1, cv2.LINE_AA,
+                )
+
+                # ── Draw bounding boxes ──────────────────────────────────────
+                for log in logs:
+                    x1 = max(0, int(log.x1))
+                    y1 = max(0, int(log.y1))
+                    x2 = min(W, int(log.x2))
+                    y2 = min(H, int(log.y2))
+
+                    if x2 <= x1 or y2 <= y1:
+                        continue
+
+                    cv2.rectangle(annotated, (x1, y1), (x2, y2), box_color, thickness)
+
+                    if is_exact:
+                        sim   = match_sims.get(log.track_id, 0.0)
+                        label = f"FOUND  ID:{log.track_id}  {sim*100:.0f}%"
+                        lbl_y = max(y1 - 8, 14)
+                        (tw, th), _ = cv2.getTextSize(label, FONT, FONT_SCALE, 2)
+                        cv2.rectangle(
+                            annotated,
+                            (x1, lbl_y - th - 4), (x1 + tw + 6, lbl_y + 2),
+                            MATCH_COLOR, -1,
+                        )
+                        cv2.putText(
+                            annotated, label, (x1 + 3, lbl_y),
+                            FONT, FONT_SCALE, (0, 0, 0), 2, cv2.LINE_AA,
+                        )
+
+                writer.write(annotated)
+                rendered_ms += frame_ms_step
+
+    finally:
+        writer.release()
+        cap.release()
+
     out_size = output_path.stat().st_size if output_path.exists() else 0
     logger.info(
-        "Render complete: %s | %d frames | %.1f s | %.1f KB",
-        output_path.name, rendered, duration_sec, out_size / 1024,
+        "Render done: %s | %.1fs | %.1f KB",
+        output_path.name, rendered_ms/1000, out_size/1024,
     )
 
     if out_size < 1024:
-        logger.error("Output too small (%d bytes) — trying imageio re-encode.", out_size)
+        logger.error("Output too small (%d bytes) — trying ffmpeg re-encode.", out_size)
 
-    # Re-encode to H.264 using imageio (bundled with ultralytics, always available)
     _reencode_with_imageio(output_path)
 
 
